@@ -1,0 +1,150 @@
+[build-system]
+# scikit-build-core drives CMake and packages everything into a wheel.
+# pybind11 is listed here so the build isolation environment has it available
+# for find_package(pybind11 CONFIG REQUIRED) inside CMakeLists.txt.
+requires = ["scikit-build-core>=0.9", "pybind11"]
+build-backend = "scikit_build_core.build"
+
+# ---------------------------------------------------------------------------
+# Project metadata
+# ---------------------------------------------------------------------------
+[project]
+name        = "hydrafers"
+version     = "1.0.0"
+description = "HydraFERS — modern CAEN FERS/Janus DAQ software (Python + ferslib via pyfers)"
+readme      = "README.md"
+requires-python = ">=3.10"
+license     = { text = "GPL-2.0-or-later" }
+authors     = [
+    { name = "CAEN Front End Division", email = "g.becuzzi@caen.it" }
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: C++",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+
+# ---------------------------------------------------------------------------
+# Core runtime dependencies (always installed with the base wheel).
+# These are required regardless of whether the GUI or CLI extras are used.
+#
+# Rationale for the base/extras split:
+#   - numpy, pydantic, pyyaml: core logic (config, io, core) depends on them.
+#     They are small, have no system-level dependencies, and every usage mode
+#     (GUI, CLI, batch, embedded) needs them.
+#   - PySide6 / pyqtgraph: ~250 MB, only needed for the Qt GUI. Optional [gui].
+#   - textual / rich: TUI dependencies; not needed when using the GUI or in
+#     pure-batch mode. Optional [cli].
+# ---------------------------------------------------------------------------
+dependencies = [
+    "numpy>=1.24",
+    "pydantic>=2",
+    "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+gui = [
+    "PySide6>=6.5",
+    "pyqtgraph>=0.13",
+]
+cli = [
+    "textual>=0.50",
+    "rich>=13",
+]
+# Convenience meta-extra: installs everything.
+all = [
+    "hydrafers[gui]",
+    "hydrafers[cli]",
+]
+# Developer tools (not distributed to end users).
+dev = [
+    "hydrafers[all]",
+    "pytest>=7",
+    "pytest-timeout",
+    "mypy",
+    "ruff",
+]
+
+[project.scripts]
+hydrafers-gui = "hydrafers.gui.__main__:main"
+hydrafers-cli = "hydrafers.cli.__main__:main"
+
+[project.urls]
+Homepage   = "https://www.caen.it"
+Repository = "https://github.com/caen-it/hydrafers"
+
+# ---------------------------------------------------------------------------
+# scikit-build-core: bridges pyproject.toml → CMake → wheel
+# ---------------------------------------------------------------------------
+[tool.scikit-build]
+# Release build by default; override with CMAKE_BUILD_TYPE env var if needed.
+cmake.build-type = "Release"
+
+# The Python source package (src-layout).
+# scikit-build-core will include src/hydrafers/ in the wheel as the
+# top-level 'hydrafers' package.
+wheel.packages = ["src/hydrafers"]
+
+# The compiled pyfers extension is installed by CMakeLists.txt to ".".
+# scikit-build-core collects whatever CMake installs into "." at the
+# wheel root, so 'import pyfers' resolves at the same level as
+# 'import hydrafers'.
+
+# Pass the source tree root so CMakeLists.txt can find native/ relative
+# to the project root (standard behaviour; no extra variable needed).
+
+# ---------------------------------------------------------------------------
+# cibuildwheel — produce wheels for Win/Linux across Python 3.10–3.12
+# ---------------------------------------------------------------------------
+[tool.cibuildwheel]
+build = "cp310-* cp311-* cp312-*"
+skip  = "*-musllinux*"
+
+[tool.cibuildwheel.windows]
+before-build         = "pip install delvewheel"
+repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel} --add-path build"
+
+[tool.cibuildwheel.linux]
+before-build         = "yum install -y libusb1-devel || apt-get install -y libusb-1.0-0-dev || true"
+repair-wheel-command = "auditwheel repair -w {dest_dir} {wheel}"
+
+[tool.cibuildwheel.macos]
+before-build = "brew install libusb"
+
+# ---------------------------------------------------------------------------
+# Ruff (linter / formatter) — project-wide Python style settings
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]   # line length handled by formatter
+
+# ---------------------------------------------------------------------------
+# Mypy — static type checking
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version  = "3.10"
+strict          = false
+ignore_missing_imports = true
+packages        = ["hydrafers"]
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+timeout   = 30

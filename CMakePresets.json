@@ -1,0 +1,90 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": { "major": 3, "minor": 16, "patch": 0 },
+    "configurePresets": [
+        {
+            "name": "base",
+            "hidden": true,
+            "cacheVariables": {
+                "BUILD_PYTHON_BINDINGS": "ON"
+            }
+        },
+        {
+            "name": "vs2022",
+            "displayName": "Visual Studio 17 2022 (x64)",
+            "description": "MSVC generator — open HydraFERS/build-vs/hydrafers.sln in Visual Studio to build and debug pyferslib",
+            "inherits": "base",
+            "binaryDir": "${sourceDir}/build-vs",
+            "generator": "Visual Studio 17 2022",
+            "architecture": {
+                "value": "x64",
+                "strategy": "set"
+            },
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "vs2022-debug",
+            "displayName": "Visual Studio 17 2022 (x64, Debug)",
+            "description": "Debug build — step through pyferslib.cpp and ferslib C sources in the VS debugger",
+            "inherits": "vs2022",
+            "binaryDir": "${sourceDir}/build-vs-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "ninja-release",
+            "displayName": "Ninja / Release",
+            "description": "Fast single-config Ninja build; works with MSVC, clang-cl, or GCC; produces pyferslib extension",
+            "inherits": "base",
+            "binaryDir": "${sourceDir}/build",
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "ninja-debug",
+            "displayName": "Ninja / Debug",
+            "description": "Debug build via Ninja (MSVC or GCC); useful for profiling the pyferslib data-plane",
+            "inherits": "base",
+            "binaryDir": "${sourceDir}/build-debug",
+            "generator": "Ninja",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "mingw",
+            "displayName": "MinGW (x86_64 cross / native)",
+            "description": "Builds with x86_64-w64-mingw32 toolchain via cmake/mingw-toolchain.cmake; produces pyferslib.pyd",
+            "inherits": "base",
+            "binaryDir": "${sourceDir}/build-mingw",
+            "generator": "Ninja",
+            "toolchainFile": "${sourceDir}/cmake/mingw-toolchain.cmake",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "native-bindings-only",
+            "displayName": "Ninja / bindings only (scikit-build-core)",
+            "description": "Used by scikit-build-core during pip install; builds only the pyferslib extension",
+            "inherits": "ninja-release",
+            "binaryDir": "${sourceDir}/build-skbuild",
+            "cacheVariables": {
+                "BUILD_PYTHON_BINDINGS": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        { "name": "vs2022",               "configurePreset": "vs2022",               "configuration": "Release" },
+        { "name": "vs2022-debug",         "configurePreset": "vs2022-debug",         "configuration": "Debug"   },
+        { "name": "ninja-release",        "configurePreset": "ninja-release"                                    },
+        { "name": "ninja-debug",          "configurePreset": "ninja-debug"                                      },
+        { "name": "mingw",                "configurePreset": "mingw"                                            },
+        { "name": "native-bindings-only", "configurePreset": "native-bindings-only"                            }
+    ]
+}
