@@ -89,3 +89,7 @@ NSIS/
 # Documentation build
 docs/_build/
 docs/site/
+
+
+## Others
+*.deb
