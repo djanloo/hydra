@@ -23,6 +23,7 @@
 //   * drain_events is the C-side DATA-plane batch primitive over get_event.
 
 #include <pybind11/pybind11.h>
+#include <pybind11/eval.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 
@@ -979,30 +980,26 @@ PYBIND11_MODULE(pyferslib, m)
         "raise pyferslib.FERSError(code, message).";
 
     // ----- FERSError exception -----
-    // Custom exception carrying both the numeric ferslib code and the message.
-    py::object py_exc = py::module_::import("builtins").attr("Exception");
-    py::dict ns;
-    ns["__init__"] = py::cpp_function(
-        [](py::object self, int code, py::str message) {
-            self.attr("code") = code;
-            self.attr("message") = message;
-            // Initialize the base Exception with (code, message) for repr / str.
-            py::object base_init =
-                py::module_::import("builtins").attr("Exception").attr("__init__");
-            base_init(self, code, message);
-        },
-        py::arg("self"), py::arg("code"), py::arg("message"));
-    py::object fers_error =
-        py::reinterpret_steal<py::object>(PyObject_CallFunction(
-            reinterpret_cast<PyObject*>(&PyType_Type),
-            const_cast<char*>("s(O)O"),
-            "FERSError",
-            py_exc.ptr(),
-            ns.ptr()));
-    if (!fers_error)
-        throw py::error_already_set();
-    fers_error.attr("__module__") = "pyferslib";
-    m.attr("FERSError") = fers_error;
+    // Defined as a pure-Python class so that Python's normal descriptor protocol
+    // binds `self` when __init__ is called on a new instance.  Using a raw
+    // py::cpp_function assigned to a dynamically-created type() class bypasses
+    // the descriptor machinery, causing __init__ to be invoked without self and
+    // raising a pybind11 "incompatible function arguments" TypeError instead of
+    // the intended FERSError.
+    py::exec(
+        "class FERSError(Exception):\n"
+        "    '''FERS library error: carries numeric code and message from ferslib.'''\n"
+        "    def __init__(self, code, message):\n"
+        "        self.code = int(code)\n"
+        "        self.message = str(message)\n"
+        "        super().__init__(int(code), str(message))\n"
+        "    def __str__(self):\n"
+        "        return '[FERS {}] {}'.format(self.code, self.message)\n"
+        "    def __repr__(self):\n"
+        "        return 'FERSError(code={!r}, message={!r})'.format(self.code, self.message)\n",
+        m.attr("__dict__")
+    );
+    m.attr("FERSError").attr("__module__") = "pyferslib";
     g_fers_error_type = m.attr("FERSError");
 
     // ----- Bound struct / event classes (read-only data classes) -----
