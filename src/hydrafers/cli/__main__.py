@@ -220,6 +220,11 @@ def _cmd_tui(args: argparse.Namespace, console: Console) -> int:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+def tui_main(argv: list[str] | None = None) -> int:
+    """Direct entry point for the ``hydrafers-tui`` console script."""
+    return main(["tui", *(argv or [])])
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse arguments and dispatch to the selected subcommand.
 

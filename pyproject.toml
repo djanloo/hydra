@@ -76,7 +76,9 @@ dev = [
 ]
 
 [project.scripts]
+hydrafers     = "hydrafers.__main__:main"
 hydrafers-gui = "hydrafers.gui.__main__:main"
+hydrafers-tui = "hydrafers.cli.__main__:tui_main"
 hydrafers-cli = "hydrafers.cli.__main__:main"
 
 [project.urls]

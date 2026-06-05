@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QStackedWidget,
     QStatusBar,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -49,6 +50,12 @@ from PySide6.QtWidgets import (
 
 from hydrafers.config import HydraConfig, default_config, load_config, save_config
 from hydrafers.config.schema import BoardConfig
+from hydrafers.gui.config_form import (
+    SECTION_SPECS,
+    SECTION_TITLES,
+    BoardSettingsForm,
+    SectionForm,
+)
 from hydrafers.core import AcqState, AcquisitionEngine, BoardStatus, RunStatistics
 from hydrafers.gui.plots.map2d import Map2DPlot
 from hydrafers.gui.plots.spectrum import SPECTRUM_SOURCES, SpectrumPlot
@@ -60,6 +67,15 @@ logger = logging.getLogger("hydrafers.gui.main_window")
 
 _REFRESH_MS = 66   # ~15 Hz poll
 _MAX_BOARDS = 8    # rows shown in Connect page
+
+# Sidebar / stack page indices (single source of truth).
+(PG_CONNECT, PG_SETTINGS, PG_OVERVIEW, PG_STATS,
+ PG_SPECTRA, PG_MAP, PG_HV, PG_REGS, PG_LOG) = range(9)
+
+_PAGE_NAMES = [
+    "Connect", "Settings", "Overview", "Statistics",
+    "Spectra", "Map 2D", "HV / Temps", "Registers", "Log",
+]
 
 
 # AcqState → (StatusBadge state, badge text, LED colour)
@@ -202,8 +218,7 @@ class MainWindow(QMainWindow):
             brand="HydraFERS",
             logo_path=_logo if _logo.exists() else None,
         )
-        for name in ["Connect", "Overview", "Statistics",
-                     "Spectra", "Map 2D", "HV & Temps", "Registers", "Log"]:
+        for name in _PAGE_NAMES:
             self._sidebar.add_page(name)
         self._sidebar.page_selected.connect(self._switch_page)
         layout.addWidget(self._sidebar)
@@ -217,6 +232,7 @@ class MainWindow(QMainWindow):
         self._stack = QStackedWidget()
         for builder in [
             self._build_connect_page,
+            self._build_settings_page,
             self._build_overview_page,
             self._build_statistics_page,
             self._build_spectra_page,
@@ -226,6 +242,9 @@ class MainWindow(QMainWindow):
             self._build_log_page,
         ]:
             self._stack.addWidget(builder())
+
+        # Populate every editing form from the active config now that they exist.
+        self._populate_forms(self._config)
         col.addWidget(self._stack, 1)
         layout.addWidget(content, 1)
 
@@ -410,6 +429,9 @@ class MainWindow(QMainWindow):
                 path_edit.setText(initial_boards[i].Open)
             brow.addWidget(path_edit)
 
+            enable_cb.toggled.connect(self._sync_board_count)
+            path_edit.editingFinished.connect(self._sync_board_count)
+
             pid_lbl   = QLabel("—"); pid_lbl.setFixedWidth(80);   pid_lbl.setObjectName("FieldValue")
             model_lbl = QLabel("—"); model_lbl.setFixedWidth(130); model_lbl.setObjectName("FieldValue")
             fw_lbl    = QLabel("—"); fw_lbl.setFixedWidth(180);   fw_lbl.setObjectName("FieldValue")
@@ -426,6 +448,53 @@ class MainWindow(QMainWindow):
 
         scroll.setWidget(inner)
         return scroll
+
+    def _build_settings_page(self) -> QWidget:
+        page = QWidget()
+        vbox = QVBoxLayout(page)
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(0)
+
+        tabs = QTabWidget()
+        self._section_forms: dict[str, SectionForm] = {}
+
+        # Global section tabs in a deliberate order.
+        for name in ("acq_mode", "discr", "spectroscopy", "hv_bias",
+                     "run_ctrl", "output_files", "test_probe"):
+            form = SectionForm(SECTION_SPECS[name])
+            self._section_forms[name] = form
+            tabs.addTab(form, SECTION_TITLES[name])
+
+        # Per-board / per-channel tab.
+        self._board_form = BoardSettingsForm()
+        board_scroll = QScrollArea()
+        board_scroll.setWidgetResizable(True)
+        board_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        board_scroll.setWidget(self._board_form)
+        tabs.addTab(board_scroll, "Board / Channel")
+
+        vbox.addWidget(tabs, 1)
+
+        # Action button row.
+        bar = QFrame()
+        bar.setObjectName("PageHeader")
+        bar.setFixedHeight(52)
+        brow = QHBoxLayout(bar)
+        brow.setContentsMargins(16, 8, 16, 8)
+        hint = QLabel("Edit parameters, then apply to the running engine or save to file.")
+        hint.setObjectName("FieldLabel")
+        brow.addWidget(hint)
+        brow.addStretch(1)
+        btn_revert = QPushButton("Revert")
+        btn_revert.clicked.connect(lambda: self._populate_forms(self._config))
+        brow.addWidget(btn_revert)
+        btn_apply = QPushButton("Apply to Engine")
+        btn_apply.setObjectName("PrimaryButton")
+        btn_apply.clicked.connect(self._apply_settings)
+        brow.addWidget(btn_apply)
+        vbox.addWidget(bar)
+
+        return page
 
     def _build_overview_page(self) -> QWidget:
         scroll = QScrollArea()
@@ -752,13 +821,10 @@ class MainWindow(QMainWindow):
 
     # ================================================================ navigation
 
-    _PAGE_TITLES = ["Connect", "Overview", "Statistics",
-                    "Spectra", "Map 2D", "HV & Temps", "Registers", "Log"]
-
     @Slot(int)
     def _switch_page(self, index: int) -> None:
         self._stack.setCurrentIndex(index)
-        self._header_title.setText(self._PAGE_TITLES[index])
+        self._header_title.setText(_PAGE_NAMES[index])
 
     # ================================================================ actions
 
@@ -769,13 +835,31 @@ class MainWindow(QMainWindow):
                                    AcqState.EMPTYING):
             self._run_op(self._engine.disconnect, "Disconnecting…")
         else:
-            self._apply_board_paths_to_config()
+            try:
+                self._config = self._collect_config()
+                self._engine.configure(self._config, soft=False)
+            except Exception as exc:
+                QMessageBox.critical(self, "Invalid configuration", str(exc))
+                return
             self._run_op(self._engine.connect, "Connecting…")
 
     @Slot()
     def _action_start(self) -> None:
         n = self._run_spin.value()
-        self._run_op(lambda: self._engine.start_run(n), "Starting run…")
+        # Auto-apply the current settings before each run so edits made in the
+        # Settings page take effect without a manual "Apply to Engine".
+        try:
+            cfg = self._collect_config()
+        except Exception as exc:
+            QMessageBox.critical(self, "Invalid configuration", str(exc))
+            return
+        self._config = cfg
+
+        def _do() -> None:
+            self._engine.configure(cfg, soft=True)
+            self._engine.start_run(n)
+
+        self._run_op(_do, "Applying config & starting run…")
 
     @Slot()
     def _action_stop(self) -> None:
@@ -786,20 +870,68 @@ class MainWindow(QMainWindow):
         self._freeze = checked
         self._btn_freeze.setText("Frozen" if checked else "Freeze")
 
-    def _apply_board_paths_to_config(self) -> None:
-        """Collect board paths from UI and update self._config.boards."""
-        boards: list[BoardConfig] = []
+    def _connect_paths(self) -> list[str]:
+        """Enabled, non-empty board paths from the Connect page rows."""
+        paths: list[str] = []
         for enable_cb, path_edit, *_ in self._board_path_rows:
             path = path_edit.text().strip()
             if enable_cb.isChecked() and path:
-                bc = BoardConfig(Open=path)
-                boards.append(bc)
-        if boards:
-            self._config = self._config.model_copy(update={"boards": boards})
-            try:
-                self._engine.configure(self._config, soft=False)
-            except Exception as exc:
-                logger.warning("configure failed: %s", exc)
+                paths.append(path)
+        if not paths:
+            if self._config.boards:
+                paths = [self._config.boards[0].Open]
+            else:
+                paths = ["eth:192.168.50.3"]
+        return paths
+
+    def _collect_config(self) -> HydraConfig:
+        """Build a validated HydraConfig from every editing widget.
+
+        Raises pydantic ValidationError / ValueError on bad input — the caller is
+        expected to surface it to the user.
+        """
+        paths = self._connect_paths()
+        board_dicts = self._board_form.board_dicts()
+        boards: list[BoardConfig] = []
+        for i, path in enumerate(paths):
+            d = dict(board_dicts[i]) if i < len(board_dicts) else {}
+            d["Open"] = path
+            boards.append(BoardConfig(**d))   # validates
+
+        sections: dict = {}
+        for name, form in self._section_forms.items():
+            cur = getattr(self._config, name)
+            merged = {**cur.model_dump(), **form.values()}
+            sections[name] = type(cur)(**merged)  # validates
+
+        return HydraConfig(version=self._config.version, boards=boards, **sections)
+
+    def _populate_forms(self, cfg: HydraConfig) -> None:
+        """Fill every editing widget from *cfg*."""
+        for name, form in self._section_forms.items():
+            form.load(getattr(cfg, name))
+        self._board_form.load_boards(cfg.boards)
+
+    def _sync_board_count(self) -> None:
+        """Keep the Board/Channel selector in step with the Connect page rows."""
+        if not hasattr(self, "_board_form"):
+            return
+        paths = self._connect_paths()
+        self._board_form.set_count(len(paths), paths)
+
+    @Slot()
+    def _apply_settings(self) -> None:
+        try:
+            cfg = self._collect_config()
+        except Exception as exc:
+            QMessageBox.critical(self, "Invalid configuration", str(exc))
+            return
+        self._config = cfg
+        self._append_log("info", "Configuration updated from settings.")
+        if self._engine.state in (AcqState.READY, AcqState.RUNNING):
+            self._run_op(
+                lambda: self._engine.configure(cfg, soft=True), "Applying config…"
+            )
 
     def _run_op(self, fn: Callable[[], None], status: str) -> None:
         if self._op_thread is not None and self._op_thread.isRunning():
@@ -1155,6 +1287,7 @@ class MainWindow(QMainWindow):
             self._config_path = Path(path)
             self._cfg_path_label.setText(str(self._config_path))
             self._refresh_board_path_rows()
+            self._populate_forms(cfg)
             self._append_log("info", f"Loaded config: {path}")
         except Exception as exc:
             QMessageBox.critical(self, "Load Config", f"Failed to load config:\n{exc}")
@@ -1166,6 +1299,11 @@ class MainWindow(QMainWindow):
             "YAML files (*.yaml *.yml);;All files (*)"
         )
         if not path:
+            return
+        try:
+            self._config = self._collect_config()
+        except Exception as exc:
+            QMessageBox.critical(self, "Invalid configuration", str(exc))
             return
         try:
             save_config(self._config, path)
@@ -1206,14 +1344,14 @@ class MainWindow(QMainWindow):
 
         if self._engine.state == AcqState.RUNNING and not self._freeze:
             page = self._stack.currentIndex()
-            if page == 2:  # Statistics
+            if page == PG_STATS:
                 if stats is not None:
                     self._update_ch_grid(stats)
                     self._update_all_boards_table(stats)
-            elif page == 3:  # Spectra
+            elif page == PG_SPECTRA:
                 histo = self._engine.histograms()
                 self._spectrum_plot.update_data(histo)
-            elif page == 4:  # Map 2D
+            elif page == PG_MAP:
                 if self._map_mode.currentText() == "Counts":
                     histo = self._engine.histograms()
                     cnt = histo.get("cnt_2d")
