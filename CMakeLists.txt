@@ -71,6 +71,8 @@ set(FERS_SRC
 # -------------------------
 add_library(ferslib STATIC ${FERS_SRC})
 
+set_target_properties(ferslib PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 target_include_directories(ferslib
     PUBLIC  ${FERSLIB_INCLUDE_DIR}
     PRIVATE ${PLATFORM_INCLUDE_DIRS}
