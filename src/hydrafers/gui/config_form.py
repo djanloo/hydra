@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -313,6 +313,23 @@ def _set_widget(w: QWidget, spec: FieldSpec, value) -> None:
         w.setText(str(value))
 
 
+def _wire_change(w: QWidget, kind: str, slot) -> None:
+    """Connect *w*'s user-edit signal to *slot*.
+
+    For line edits we use ``textEdited`` (fires only on real user input, not on
+    programmatic ``setText``); combos/spins are guarded by a ``_suppress`` flag
+    in the owning form during ``load``.
+    """
+    if kind == "combo":
+        w.currentIndexChanged.connect(slot)
+    elif kind == "bool":
+        w.toggled.connect(slot)
+    elif kind in ("int", "float"):
+        w.valueChanged.connect(slot)
+    else:  # unit / str / hex
+        w.textEdited.connect(slot)
+
+
 def _widget_value(w: QWidget, spec: FieldSpec):
     if spec.kind == "combo":
         return w.currentText()
@@ -333,12 +350,16 @@ def _widget_value(w: QWidget, spec: FieldSpec):
 class SectionForm(QScrollArea):
     """Editable form bound to one global section model (e.g. ``acq_mode``)."""
 
+    #: Emitted when the user edits any field (not while ``load`` is filling it).
+    changed = Signal()
+
     def __init__(self, specs: list[FieldSpec], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self._specs = specs
         self._widgets: dict[str, QWidget] = {}
+        self._suppress = False
 
         inner = QWidget()
         outer = QVBoxLayout(inner)
@@ -364,6 +385,7 @@ class SectionForm(QScrollArea):
             if spec.tip:
                 w.setToolTip(spec.tip)
             self._widgets[spec.key] = w
+            _wire_change(w, spec.kind, self._emit_changed)
             grid.addWidget(lbl, row, col, Qt.AlignmentFlag.AlignRight)
             grid.addWidget(w, row, col + 1)
         grid.setColumnStretch(1, 1)
@@ -373,9 +395,17 @@ class SectionForm(QScrollArea):
         outer.addStretch(1)
         self.setWidget(inner)
 
+    def _emit_changed(self, *_) -> None:
+        if not self._suppress:
+            self.changed.emit()
+
     def load(self, model) -> None:
-        for spec in self._specs:
-            _set_widget(self._widgets[spec.key], spec, getattr(model, spec.key))
+        self._suppress = True
+        try:
+            for spec in self._specs:
+                _set_widget(self._widgets[spec.key], spec, getattr(model, spec.key))
+        finally:
+            self._suppress = False
 
     def values(self) -> dict:
         return {spec.key: _widget_value(self._widgets[spec.key], spec)
@@ -488,10 +518,14 @@ class BoardSettingsForm(QWidget):
     flushes the visible board before switching selection.
     """
 
+    #: Emitted when the user edits any board/channel field.
+    changed = Signal()
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._boards: list[dict] = [self._default_dict()]
         self._cur = 0
+        self._suppress = False
         self._scalar_widgets: dict[str, QWidget] = {}
         self._array_state: dict[str, list[int]] = {}
         self._array_bcast: dict[str, QSpinBox] = {}
@@ -529,6 +563,7 @@ class BoardSettingsForm(QWidget):
             if spec.tip:
                 w.setToolTip(spec.tip)
             self._scalar_widgets[spec.key] = w
+            _wire_change(w, spec.kind, self._emit_changed)
             form.addRow(spec.label + ":", w)
         sc_v.addLayout(form)
         root.addWidget(scalar_card)
@@ -588,14 +623,20 @@ class BoardSettingsForm(QWidget):
         d.pop("Open", None)
         return d
 
+    def _emit_changed(self, *_) -> None:
+        if not self._suppress:
+            self.changed.emit()
+
     def _broadcast(self, key: str) -> None:
         val = self._array_bcast[key].value()
         self._array_state[key] = [val] * NUM_CHANNELS
+        self._emit_changed()
 
     def _edit_channels(self, key: str, label: str, lo: int, hi: int) -> None:
         dlg = ChannelArrayDialog(label, self._array_state[key], lo, hi, self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._array_state[key] = dlg.values()
+            self._emit_changed()
 
     # -------- board switching --------
     def _on_board_change(self, new_idx: int) -> None:
@@ -618,13 +659,17 @@ class BoardSettingsForm(QWidget):
             return
         self._cur = idx
         d = self._boards[idx]
-        for spec in _BOARD_SCALARS:
-            _set_widget(self._scalar_widgets[spec.key], spec, d[spec.key])
-        for key, _label, lo, _hi in _CHANNEL_ARRAYS:
-            vals = list(d.get(key, [lo] * NUM_CHANNELS))
-            self._array_state[key] = vals
-            # broadcast box shows the common value, or the first if mixed
-            self._array_bcast[key].setValue(vals[0] if vals else lo)
+        self._suppress = True
+        try:
+            for spec in _BOARD_SCALARS:
+                _set_widget(self._scalar_widgets[spec.key], spec, d[spec.key])
+            for key, _label, lo, _hi in _CHANNEL_ARRAYS:
+                vals = list(d.get(key, [lo] * NUM_CHANNELS))
+                self._array_state[key] = vals
+                # broadcast box shows the common value, or the first if mixed
+                self._array_bcast[key].setValue(vals[0] if vals else lo)
+        finally:
+            self._suppress = False
 
     # -------- public API --------
     def set_count(self, n: int, paths: list[str] | None = None) -> None:

@@ -431,6 +431,8 @@ class MainWindow(QMainWindow):
 
             enable_cb.toggled.connect(self._sync_board_count)
             path_edit.editingFinished.connect(self._sync_board_count)
+            enable_cb.toggled.connect(self._mark_dirty)
+            path_edit.textEdited.connect(self._mark_dirty)
 
             pid_lbl   = QLabel("—"); pid_lbl.setFixedWidth(80);   pid_lbl.setObjectName("FieldValue")
             model_lbl = QLabel("—"); model_lbl.setFixedWidth(130); model_lbl.setObjectName("FieldValue")
@@ -489,10 +491,17 @@ class MainWindow(QMainWindow):
         btn_revert.clicked.connect(lambda: self._populate_forms(self._config))
         brow.addWidget(btn_revert)
         btn_apply = QPushButton("Apply to Engine")
-        btn_apply.setObjectName("PrimaryButton")
+        btn_apply.setObjectName("ApplyButton")
+        btn_apply.setProperty("dirty", "false")
         btn_apply.clicked.connect(self._apply_settings)
         brow.addWidget(btn_apply)
+        self._btn_apply_settings = btn_apply
         vbox.addWidget(bar)
+
+        # Any edit in a section/board form marks the config dirty (button → orange).
+        for form in self._section_forms.values():
+            form.changed.connect(self._mark_dirty)
+        self._board_form.changed.connect(self._mark_dirty)
 
         return page
 
@@ -841,6 +850,7 @@ class MainWindow(QMainWindow):
             except Exception as exc:
                 QMessageBox.critical(self, "Invalid configuration", str(exc))
                 return
+            self._mark_clean()
             self._run_op(self._engine.connect, "Connecting…")
 
     @Slot()
@@ -854,6 +864,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Invalid configuration", str(exc))
             return
         self._config = cfg
+        self._mark_clean()
 
         def _do() -> None:
             self._engine.configure(cfg, soft=True)
@@ -907,10 +918,11 @@ class MainWindow(QMainWindow):
         return HydraConfig(version=self._config.version, boards=boards, **sections)
 
     def _populate_forms(self, cfg: HydraConfig) -> None:
-        """Fill every editing widget from *cfg*."""
+        """Fill every editing widget from *cfg* (forms now match config: clean)."""
         for name, form in self._section_forms.items():
             form.load(getattr(cfg, name))
         self._board_form.load_boards(cfg.boards)
+        self._mark_clean()
 
     def _sync_board_count(self) -> None:
         """Keep the Board/Channel selector in step with the Connect page rows."""
@@ -918,6 +930,24 @@ class MainWindow(QMainWindow):
             return
         paths = self._connect_paths()
         self._board_form.set_count(len(paths), paths)
+
+    def _set_dirty(self, dirty: bool) -> None:
+        """Toggle the 'pending changes' visual state of the Apply button."""
+        if not hasattr(self, "_btn_apply_settings"):
+            return
+        self._dirty = dirty
+        btn = self._btn_apply_settings
+        btn.setProperty("dirty", "true" if dirty else "false")
+        btn.setText("Apply to Engine  ●" if dirty else "Apply to Engine")
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+
+    @Slot()
+    def _mark_dirty(self) -> None:
+        self._set_dirty(True)
+
+    def _mark_clean(self) -> None:
+        self._set_dirty(False)
 
     @Slot()
     def _apply_settings(self) -> None:
@@ -927,6 +957,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Invalid configuration", str(exc))
             return
         self._config = cfg
+        self._mark_clean()
         self._append_log("info", "Configuration updated from settings.")
         if self._engine.state in (AcqState.READY, AcqState.RUNNING):
             self._run_op(
@@ -1309,6 +1340,7 @@ class MainWindow(QMainWindow):
             save_config(self._config, path)
             self._config_path = Path(path)
             self._cfg_path_label.setText(str(self._config_path))
+            self._mark_clean()
             self._append_log("info", f"Saved config: {path}")
         except Exception as exc:
             QMessageBox.critical(self, "Save Config", f"Failed to save config:\n{exc}")

@@ -202,6 +202,25 @@ QPushButton#AccentButton {
 QPushButton#AccentButton:hover { background: #4caf50; }
 QPushButton#AccentButton:pressed { background: #2e7d32; }
 
+/* Apply button: neutral when in sync, orange when there are pending edits. */
+QPushButton#ApplyButton {
+    background: #eceff1;
+    border: 1px solid #cfd8dc;
+    color: #90a4ae;
+    font-weight: 600;
+}
+
+QPushButton#ApplyButton:hover { background: #e1e6e9; }
+
+QPushButton#ApplyButton[dirty="true"] {
+    background: #f5a623;
+    border: 1px solid #f5a623;
+    color: #ffffff;
+}
+
+QPushButton#ApplyButton[dirty="true"]:hover { background: #e89914; }
+QPushButton#ApplyButton[dirty="true"]:pressed { background: #d8890a; }
+
 /* ------------------------------------------------------------ Status badge */
 QLabel#StatusBadge {
     border-radius: 11px;

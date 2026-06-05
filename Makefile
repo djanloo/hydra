@@ -5,9 +5,13 @@ SITE_PKG := $(shell $(PYTHON) -c "import site; print(site.getsitepackages()[0])"
 BUILD    := build-debug
 ROOT     := $(abspath .)
 
-.PHONY: all build dev-install clean help
+.PHONY: all build dev-install appimage clean help
 
 all: build dev-install   ## Build extension + register in venv (default)
+
+appimage:                ## Bundle the GUI into a self-contained Linux .AppImage
+	@$(PYTHON) -m pip show pyinstaller >/dev/null 2>&1 || $(PYTHON) -m pip install pyinstaller
+	PYTHON='$(PYTHON)' bash packaging/build_appimage.sh
 
 build:                   ## (Re)build the pyferslib C++ extension
 	cmake --build $(BUILD) --target pyferslib -- -j$$(nproc)

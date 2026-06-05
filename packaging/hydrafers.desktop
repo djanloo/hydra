@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=HydraFERS
+GenericName=FERS DAQ
+Comment=CAEN FERS acquisition GUI
+Exec=hydrafers
+Icon=hydrafers
+Terminal=false
+Categories=Science;Physics;Education;
+Keywords=CAEN;FERS;Janus;DAQ;
