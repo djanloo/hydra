@@ -22,7 +22,11 @@
 }
 
 QMainWindow,
-QWidget#CentralRoot {
+QWidget#CentralRoot,
+QStackedWidget,
+QScrollArea,
+QScrollArea > QWidget,
+QScrollArea > QWidget > QWidget {
     background: #eceff1;
 }
 

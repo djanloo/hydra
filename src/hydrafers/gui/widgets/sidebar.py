@@ -10,10 +10,14 @@ with the integer page index; the active button is highlighted via the
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from pathlib import Path
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
+    QHBoxLayout,
     QLabel,
     QPushButton,
     QSizePolicy,
@@ -27,7 +31,12 @@ class Sidebar(QFrame):
     #: Emitted with the page index of the newly selected nav item.
     page_selected = Signal(int)
 
-    def __init__(self, brand: str = "FERS", parent=None) -> None:
+    def __init__(
+        self,
+        brand: str = "FERS",
+        logo_path: str | Path | None = None,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("Sidebar")
 
@@ -39,10 +48,27 @@ class Sidebar(QFrame):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # Brand area: logo + text side by side
+        brand_row = QHBoxLayout()
+        brand_row.setContentsMargins(12, 12, 12, 8)
+        brand_row.setSpacing(10)
+
+        if logo_path is not None:
+            px = QPixmap(str(logo_path))
+            if not px.isNull():
+                logo_lbl = QLabel()
+                logo_lbl.setPixmap(
+                    px.scaledToHeight(36, Qt.TransformationMode.SmoothTransformation)
+                )
+                logo_lbl.setFixedHeight(40)
+                brand_row.addWidget(logo_lbl)
+
         brand_label = QLabel(brand)
         brand_label.setObjectName("SidebarBrand")
-        layout.addWidget(brand_label)
-        layout.addSpacing(6)
+        brand_row.addWidget(brand_label)
+        brand_row.addStretch(1)
+        layout.addLayout(brand_row)
+        layout.addSpacing(4)
 
         self._nav_layout = QVBoxLayout()
         self._nav_layout.setContentsMargins(0, 0, 0, 0)
