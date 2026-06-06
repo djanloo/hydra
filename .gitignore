@@ -97,3 +97,4 @@ old_gui/
 *.AppImage
 FERSlib_Log.txt
 hydrafers.yaml
+build*/
