@@ -175,8 +175,24 @@ class MainWindow(QMainWindow):
         self.resize(1360, 860)
         self.setMinimumSize(960, 640)
 
-        self._config: HydraConfig = config or default_config()
+        # Config: explicit arg wins; otherwise auto-load ./hydrafers.yaml from the
+        # working directory if present, else fall back to the bundled defaults.
         self._config_path: Path | None = None
+        self._loaded_from_workspace = False
+        if config is not None:
+            self._config = config
+        else:
+            ws = Path.cwd() / "hydrafers.yaml"
+            if ws.is_file():
+                try:
+                    self._config = load_config(ws)
+                    self._config_path = ws
+                    self._loaded_from_workspace = True
+                except Exception:
+                    logger.exception("failed to auto-load %s", ws)
+                    self._config = default_config()
+            else:
+                self._config = default_config()
         self._engine = AcquisitionEngine(self._config)
         self._op_thread: _EngineOp | None = None
         self._tick_div = 0
@@ -380,6 +396,18 @@ class MainWindow(QMainWindow):
         vbox.setContentsMargins(20, 16, 20, 16)
         vbox.setSpacing(16)
 
+        # --- "Loaded from workspace" banner (only when ./hydrafers.yaml was found) ---
+        if self._loaded_from_workspace:
+            banner = QLabel()
+            banner.setObjectName("WorkspaceBanner")
+            banner.setText(
+                "  ✓  Loaded from workspace: "
+                f"{self._config_path.name if self._config_path else 'hydrafers.yaml'}"
+            )
+            if self._config_path:
+                banner.setToolTip(str(self._config_path))
+            vbox.addWidget(banner)
+
         # --- Config file card ---
         cfg_card = QFrame()
         cfg_card.setObjectName("Card")
@@ -392,7 +420,9 @@ class MainWindow(QMainWindow):
         cfg_vbox.addWidget(cfg_title)
 
         cfg_row = QHBoxLayout()
-        self._cfg_path_label = QLabel("(built-in defaults)")
+        self._cfg_path_label = QLabel(
+            str(self._config_path) if self._config_path else "(built-in defaults)"
+        )
         self._cfg_path_label.setObjectName("FieldValue")
         cfg_row.addWidget(self._cfg_path_label, 1)
         btn_load = QPushButton("Load Config…")

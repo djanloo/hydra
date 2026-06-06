@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from hydrafers.gui.icons import icon as _icon
 from hydrafers.config.schema import (
     ACQUISITION_MODE_OPTS,
     ANALOG_PROBE_OPTS,
@@ -350,6 +351,40 @@ def _widget_value(w: QWidget, spec: FieldSpec):
 
 
 # ---------------------------------------------------------------------------
+# Section headers: an icon + title, with the content indented to line up under
+# the title text (icon width + spacing) rather than under the icon.
+# ---------------------------------------------------------------------------
+SCOPE_GLOBAL_ICON = "mdi6.earth"            # applies to all boards
+SCOPE_BOARD_ICON = "mdi6.developer-board"   # one value per board
+SCOPE_CHANNEL_ICON = "mdi6.view-grid"       # one value per channel (64)
+
+_HEADING_COLOR = "#607d8b"
+_ICON_PX = 20
+_ICON_GAP = 8
+#: Left indent for a section's content so it aligns under the heading TEXT.
+CONTENT_INDENT = _ICON_PX + _ICON_GAP
+
+
+def _section_header(icon_name: str, text: str) -> QWidget:
+    """A heading row: [icon] Title, with the icon at the start of the text."""
+    box = QWidget()
+    row = QHBoxLayout(box)
+    row.setContentsMargins(0, 0, 0, 2)
+    row.setSpacing(_ICON_GAP)
+    ico = QLabel()
+    ico.setFixedWidth(_ICON_PX)
+    pm = _icon(icon_name, _HEADING_COLOR).pixmap(_ICON_PX, _ICON_PX)
+    if not pm.isNull():
+        ico.setPixmap(pm)
+    row.addWidget(ico, 0, Qt.AlignmentFlag.AlignVCenter)
+    lbl = QLabel(text)
+    lbl.setObjectName("SectionHeading")
+    row.addWidget(lbl, 0, Qt.AlignmentFlag.AlignVCenter)
+    row.addStretch(1)
+    return box
+
+
+# ---------------------------------------------------------------------------
 # SectionForm — one global config section
 # ---------------------------------------------------------------------------
 class SectionForm(QWidget):
@@ -377,12 +412,10 @@ class SectionForm(QWidget):
         cv = QVBoxLayout(card)
         cv.setContentsMargins(18, 12, 18, 14)
         cv.setSpacing(8)
-        head = QLabel(title)
-        head.setObjectName("CardTitle")
-        cv.addWidget(head)
+        cv.addWidget(_section_header(SCOPE_GLOBAL_ICON, title))
 
         grid = QGridLayout()
-        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setContentsMargins(CONTENT_INDENT, 0, 0, 0)
         grid.setHorizontalSpacing(18)
         grid.setVerticalSpacing(10)
 
@@ -652,10 +685,9 @@ class BoardScopeForm(QWidget):
             cv = QVBoxLayout(card)
             cv.setContentsMargins(18, 12, 18, 12)
             cv.setSpacing(8)
-            t = QLabel("Per-Board Parameters")
-            t.setObjectName("CardTitle")
-            cv.addWidget(t)
+            cv.addWidget(_section_header(SCOPE_BOARD_ICON, "Per-Board Parameters"))
             form = QFormLayout()
+            form.setContentsMargins(CONTENT_INDENT, 0, 0, 0)
             form.setHorizontalSpacing(18)
             form.setVerticalSpacing(9)
             for spec in scalars:
@@ -676,10 +708,9 @@ class BoardScopeForm(QWidget):
             cv = QVBoxLayout(card)
             cv.setContentsMargins(18, 12, 18, 12)
             cv.setSpacing(8)
-            t = QLabel("Per-Channel Parameters")
-            t.setObjectName("CardTitle")
-            cv.addWidget(t)
+            cv.addWidget(_section_header(SCOPE_CHANNEL_ICON, "Per-Channel Parameters"))
             grid = QGridLayout()
+            grid.setContentsMargins(CONTENT_INDENT, 0, 0, 0)
             grid.setHorizontalSpacing(12)
             grid.setVerticalSpacing(9)
             grid.addWidget(self._hdr("Parameter"), 0, 0)
