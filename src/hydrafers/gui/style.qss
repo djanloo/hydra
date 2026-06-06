@@ -79,14 +79,21 @@ QFrame#SidebarFooterBox {
     border-top: 1px solid #eceff1;
 }
 
-/* "Loaded from workspace" banner on the Connect page */
-QLabel#WorkspaceBanner {
-    background: #e8f5e9;
-    border: 1px solid #c8e6c9;
-    border-radius: 6px;
-    color: #2e7d32;
+/* Compact config-file chip in the Settings action bar.
+ * Grey for built-in defaults; green with a check when loaded from a file. */
+QLabel#ConfigChip {
+    background: #eceff1;
+    border: 1px solid #cfd8dc;
+    border-radius: 11px;
+    color: #607d8b;
     font-weight: 600;
-    padding: 8px 12px;
+    padding: 3px 12px;
+}
+
+QLabel#ConfigChip[loaded="true"] {
+    background: #e8f5e9;
+    border-color: #a5d6a7;
+    color: #2e7d32;
 }
 
 /* Section heading (icon + title) inside settings cards */
