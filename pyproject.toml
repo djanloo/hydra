@@ -93,10 +93,12 @@ Repository = "https://github.com/caen-it/hydrafers"
 # Release build by default; override with CMAKE_BUILD_TYPE env var if needed.
 cmake.build-type = "Release"
 
-# The Python source package (src-layout).
-# scikit-build-core will include src/hydrafers/ in the wheel as the
-# top-level 'hydrafers' package.
-wheel.packages = ["src/hydrafers"]
+# The pure-Python source packages (src-layout). scikit-build-core includes each
+# as a top-level package in the wheel:
+#   hydrafers  — core/config/io/gui/cli
+#   pyfers     — the pythonic SDK over pyferslib (layer 1b)
+# (the compiled `pyferslib` module is installed separately by CMakeLists.txt).
+wheel.packages = ["src/hydrafers", "src/pyfers"]
 
 # The compiled pyfers extension is installed by CMakeLists.txt to ".".
 # scikit-build-core collects whatever CMake installs into "." at the
@@ -151,3 +153,7 @@ packages        = ["hydrafers"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 timeout   = 30
+# Make the SDK importable for tests without relying on the dev .pth: add the
+# src-layout package root and the compiled-extension build dir to sys.path.
+# (pytest resolves these relative to this file's directory / the rootdir.)
+pythonpath = ["src", "build-debug"]
