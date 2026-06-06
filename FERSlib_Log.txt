@@ -1,6 +1,0 @@
-FERSlib Log created on Fri Jun  5 23:19:12 2026 UTC
-[00h:00m:00s:000ms][INFO] Opening Device with path eth:192.168.50.3
-[00h:00m:03s:003ms][ERROR] Unable to connect to server (IP=192.168.50.3, Port=9760)
-[00h:00m:06s:006ms][ERROR] Unable to connect to server (IP=192.168.50.3, Port=9000)
-[00h:00m:06s:006ms][ERROR][BRD 00] Failed to open Control Socket
-[00h:00m:06s:006ms][ERROR][BRD 00] Failed to open the device at 192.168.50.3
