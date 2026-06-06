@@ -73,17 +73,18 @@ _REFRESH_MS = 66   # ~15 Hz poll
 _MAX_BOARDS = 16   # safety cap on dynamically-added Connect rows
 
 # Sidebar / stack page indices (single source of truth).
-(PG_CONNECT, PG_SETTINGS, PG_RUNSTATS,
- PG_SPECTRA, PG_MAP, PG_HV, PG_REGS, PG_LOG) = range(8)
+(PG_SETTINGS, PG_RUNSTATS,
+ PG_SPECTRA, PG_MAP, PG_HV, PG_REGS, PG_LOG) = range(7)
 
 _PAGE_NAMES = [
-    "Connect", "Settings", "Run Statistics",
+    "Settings", "Run Statistics",
     "Spectra", "Map 2D", "HV / Temps", "Registers", "Log",
 ]
 
-# Material Design icon per nav page (aligned with _PAGE_NAMES).
+# Material Design icon per nav page (aligned with _PAGE_NAMES). Connect now
+# lives as the first tab inside Settings (board addresses are configuration too).
 _PAGE_ICONS = [
-    "mdi6.lan-connect", "mdi6.cog", "mdi6.chart-box",
+    "mdi6.cog", "mdi6.chart-box",
     "mdi6.chart-line", "mdi6.grid", "mdi6.thermometer", "mdi6.memory",
     "mdi6.text-box-outline",
 ]
@@ -258,7 +259,6 @@ class MainWindow(QMainWindow):
 
         self._stack = QStackedWidget()
         for builder in [
-            self._build_connect_page,
             self._build_settings_page,
             self._build_run_statistics_page,
             self._build_spectra_page,
@@ -566,6 +566,11 @@ class MainWindow(QMainWindow):
         # so switching board on one tab switches it everywhere.
         self._board_params = BoardParams()
 
+        # Connection is configuration too (board addresses are saved in the
+        # config and needed to fully reproduce an acquisition), so it's the
+        # first Settings tab. Built after _board_params so its rows can sync it.
+        tabs.addTab(self._build_connect_page(), "Connection")
+
         # One tab per functional section. Each tab stacks the section's global
         # params and (where they exist) its own per-board / per-channel params —
         # matching the legacy Janus tabs, so e.g. the Discriminator tab holds the
@@ -678,6 +683,7 @@ class MainWindow(QMainWindow):
         self._stats_card.add_row("total_events",  "Total events", "—")
         self._stats_card.add_row("built_events",  "Built events", "—")
         self._stats_card.add_row("event_rate",    "Event rate",   "—")
+        self._stats_card.add_row("trg_rate",      "Trigger rate", "—")
         self._stats_card.add_row("data_volume",   "Data volume",  "—")
         self._stats_card.add_row("data_rate",     "Data rate",    "—")
         vbox.addWidget(self._stats_card)
@@ -711,28 +717,33 @@ class MainWindow(QMainWindow):
         grid_outer.setContentsMargins(14, 10, 14, 10)
         grid_outer.setSpacing(6)
 
-        title_hbox = QHBoxLayout()
-        title_hbox.addWidget(QLabel("Per-Channel Rates / Counts"))
-        title_hbox.addStretch(1)
-        for c in "ABCDEFGH":
-            lbl = QLabel(c)
-            lbl.setObjectName("FieldLabel")
-            lbl.setFixedWidth(74)
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            title_hbox.addWidget(lbl)
-        grid_outer.addLayout(title_hbox)
+        grid_title = QLabel("Per-Channel Trigger Rate / Count")
+        grid_title.setObjectName("CardTitle")
+        grid_outer.addWidget(grid_title)
+
+        # A real grid keeps the row labels (channel of the leftmost cell) glued
+        # to their row and the +0..+7 column headers aligned over the cells.
+        cells = QGridLayout()
+        cells.setHorizontalSpacing(4)
+        cells.setVerticalSpacing(4)
+        corner = QLabel("ch")
+        corner.setObjectName("FieldLabel")
+        corner.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        cells.addWidget(corner, 0, 0)
+        for c in range(8):
+            h = QLabel(f"+{c}")
+            h.setObjectName("FieldLabel")
+            h.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            cells.addWidget(h, 0, c + 1)
 
         cell_font = QFont("Consolas, DejaVu Sans Mono", 9)
         self._ch_labels = []
-        for row_i in range(8):
-            rbox = QHBoxLayout()
-            rbox.setSpacing(4)
-            row_lbl = QLabel(f"{row_i * 8:>2}")
+        for r in range(8):
+            row_lbl = QLabel(f"{r * 8}")
             row_lbl.setObjectName("FieldLabel")
-            row_lbl.setFixedWidth(28)
-            rbox.addWidget(row_lbl)
-            rbox.addStretch(1)
-            for col_i in range(8):
+            row_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            cells.addWidget(row_lbl, r + 1, 0)
+            for c in range(8):
                 lbl = QLabel("—")
                 lbl.setFont(cell_font)
                 lbl.setFixedWidth(74)
@@ -742,9 +753,10 @@ class MainWindow(QMainWindow):
                     "QLabel{background:#fff;border:1px solid #e4e7eb;"
                     "border-radius:3px;color:#546e7a;}"
                 )
-                rbox.addWidget(lbl)
+                cells.addWidget(lbl, r + 1, c + 1)
                 self._ch_labels.append(lbl)
-            grid_outer.addLayout(rbox)
+        cells.setColumnStretch(9, 1)   # push the grid left, headers stay aligned
+        grid_outer.addLayout(cells)
 
         vbox.addWidget(grid_card)
 
@@ -759,11 +771,12 @@ class MainWindow(QMainWindow):
         sum_title.setObjectName("CardTitle")
         sum_vbox.addWidget(sum_title)
 
-        self._all_brd_table = QTableWidget(0, 6)
+        self._all_brd_table = QTableWidget(0, 7)
         self._all_brd_table.setHorizontalHeaderLabels(
-            ["Board", "Events", "Event Rate", "Data Rate", "Lost Events", "Bytes"]
+            ["Board", "Events", "Event Rate", "Trg Rate", "Data Rate", "Lost Events", "Bytes"]
         )
         self._all_brd_table.horizontalHeader().setStretchLastSection(True)
+        self._all_brd_table.verticalHeader().setVisible(False)
         self._all_brd_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._all_brd_table.setFixedHeight(130)
         sum_vbox.addWidget(self._all_brd_table)
@@ -1333,10 +1346,15 @@ class MainWindow(QMainWindow):
         nb = len(stats.per_board)
         t.setRowCount(nb)
         for row, bs in enumerate(sorted(stats.per_board.values(), key=lambda x: x.index)):
+            if bs.index < stats.ch_trg_rate.shape[0]:
+                brd_trg = float(stats.ch_trg_rate[bs.index].sum())
+            else:
+                brd_trg = 0.0
             items = [
                 str(bs.index),
                 f"{bs.event_count:,}",
                 _human_rate(bs.event_rate_hz),
+                _human_rate(brd_trg) if brd_trg else "—",
                 f"{bs.data_rate_mbps:.2f} MB/s",
                 f"{bs.lost_events:,}",
                 _human_bytes(bs.byte_count),
@@ -1617,6 +1635,8 @@ class MainWindow(QMainWindow):
         self._stats_card.set_value("total_events",  f"{s.total_events:,}")
         self._stats_card.set_value("built_events",  f"{s.built_events:,}")
         self._stats_card.set_value("event_rate",    _human_rate(s.event_rate_hz))
+        total_trg = float(s.ch_trg_rate.sum()) if s.ch_trg_rate.size else 0.0
+        self._stats_card.set_value("trg_rate", _human_rate(total_trg) if total_trg else "—")
         self._stats_card.set_value("data_volume",   _human_bytes(s.byte_count))
         self._stats_card.set_value("data_rate",     f"{s.data_rate_mbps:.2f} MB/s")
 
