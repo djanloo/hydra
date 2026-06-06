@@ -20,7 +20,7 @@ from pathlib import Path
 from queue import Empty
 from typing import Callable
 
-from PySide6.QtCore import QThread, QTimer, Qt, Signal, Slot
+from PySide6.QtCore import QSize, QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QAction, QFont
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -56,6 +56,7 @@ from hydrafers.gui.config_form import (
     BoardSettingsForm,
     SectionForm,
 )
+from hydrafers.gui.icons import NEUTRAL, ON_COLOR, icon
 from hydrafers.core import AcqState, AcquisitionEngine, BoardStatus, RunStatistics
 from hydrafers.gui.plots.map2d import Map2DPlot
 from hydrafers.gui.plots.spectrum import SPECTRUM_SOURCES, SpectrumPlot
@@ -75,6 +76,13 @@ _MAX_BOARDS = 8    # rows shown in Connect page
 _PAGE_NAMES = [
     "Connect", "Settings", "Overview", "Statistics",
     "Spectra", "Map 2D", "HV / Temps", "Registers", "Log",
+]
+
+# Material Design icon per nav page (aligned with _PAGE_NAMES).
+_PAGE_ICONS = [
+    "mdi6.lan-connect", "mdi6.cog", "mdi6.view-dashboard", "mdi6.chart-bar",
+    "mdi6.chart-line", "mdi6.grid", "mdi6.thermometer", "mdi6.memory",
+    "mdi6.text-box-outline",
 ]
 
 
@@ -218,8 +226,8 @@ class MainWindow(QMainWindow):
             brand="HydraFERS",
             logo_path=_logo if _logo.exists() else None,
         )
-        for name in _PAGE_NAMES:
-            self._sidebar.add_page(name)
+        for name, ic in zip(_PAGE_NAMES, _PAGE_ICONS):
+            self._sidebar.add_page(name, ic)
         self._sidebar.page_selected.connect(self._switch_page)
         layout.addWidget(self._sidebar)
 
@@ -314,24 +322,44 @@ class MainWindow(QMainWindow):
 
         row.addSpacing(8)
 
-        self._btn_freeze = QPushButton("Freeze")
+        # Icon-only action buttons (text lives in the tooltip on hover).
+        _btn_size = QSize(46, 40)
+        _icon_size = QSize(26, 26)
+
+        self._btn_freeze = QPushButton()
+        self._btn_freeze.setObjectName("IconToggle")
         self._btn_freeze.setCheckable(True)
-        self._btn_freeze.setFixedWidth(78)
+        self._btn_freeze.setFixedSize(_btn_size)
+        self._btn_freeze.setIcon(icon("mdi6.snowflake", NEUTRAL))
+        self._btn_freeze.setIconSize(_icon_size)
+        self._btn_freeze.setToolTip("Freeze live plot/stats updates (the run keeps going)")
         self._btn_freeze.toggled.connect(self._on_freeze_toggled)
         row.addWidget(self._btn_freeze)
 
-        self._btn_connect = QPushButton("Connect")
+        self._btn_connect = QPushButton()
         self._btn_connect.setObjectName("PrimaryButton")
+        self._btn_connect.setFixedSize(_btn_size)
+        self._btn_connect.setIcon(icon("mdi6.lan-connect", ON_COLOR))
+        self._btn_connect.setIconSize(_icon_size)
+        self._btn_connect.setToolTip("Apply config and connect to the boards")
         self._btn_connect.clicked.connect(self._action_connect)
         row.addWidget(self._btn_connect)
 
-        self._btn_start = QPushButton("Start Run")
+        self._btn_start = QPushButton()
         self._btn_start.setObjectName("AccentButton")
+        self._btn_start.setFixedSize(_btn_size)
+        self._btn_start.setIcon(icon("mdi6.play", ON_COLOR))
+        self._btn_start.setIconSize(_icon_size)
+        self._btn_start.setToolTip("Apply config and start a new run")
         self._btn_start.clicked.connect(self._action_start)
         row.addWidget(self._btn_start)
 
-        self._btn_stop = QPushButton("Stop Run")
+        self._btn_stop = QPushButton()
         self._btn_stop.setObjectName("DangerButton")
+        self._btn_stop.setFixedSize(_btn_size)
+        self._btn_stop.setIcon(icon("mdi6.stop", ON_COLOR))
+        self._btn_stop.setIconSize(_icon_size)
+        self._btn_stop.setToolTip("Stop the current run")
         self._btn_stop.clicked.connect(self._action_stop)
         row.addWidget(self._btn_stop)
 
@@ -365,9 +393,15 @@ class MainWindow(QMainWindow):
         self._cfg_path_label.setObjectName("FieldValue")
         cfg_row.addWidget(self._cfg_path_label, 1)
         btn_load = QPushButton("Load Config…")
+        btn_load.setIcon(icon("mdi6.folder-open", NEUTRAL))
+        btn_load.setIconSize(QSize(16, 16))
+        btn_load.setToolTip("Load a configuration from a YAML file")
         btn_load.clicked.connect(self._menu_load_config)
         cfg_row.addWidget(btn_load)
         btn_save = QPushButton("Save Config As…")
+        btn_save.setIcon(icon("mdi6.content-save", NEUTRAL))
+        btn_save.setIconSize(QSize(16, 16))
+        btn_save.setToolTip("Save the current configuration to a YAML file")
         btn_save.clicked.connect(self._menu_save_config)
         cfg_row.addWidget(btn_save)
         cfg_vbox.addLayout(cfg_row)
@@ -488,11 +522,16 @@ class MainWindow(QMainWindow):
         brow.addWidget(hint)
         brow.addStretch(1)
         btn_revert = QPushButton("Revert")
+        btn_revert.setIcon(icon("mdi6.undo", NEUTRAL))
+        btn_revert.setIconSize(QSize(16, 16))
+        btn_revert.setToolTip("Discard edits and reload the active configuration")
         btn_revert.clicked.connect(lambda: self._populate_forms(self._config))
         brow.addWidget(btn_revert)
         btn_apply = QPushButton("Apply to Engine")
         btn_apply.setObjectName("ApplyButton")
         btn_apply.setProperty("dirty", "false")
+        btn_apply.setIconSize(QSize(16, 16))
+        btn_apply.setToolTip("Send the edited configuration to the engine")
         btn_apply.clicked.connect(self._apply_settings)
         brow.addWidget(btn_apply)
         self._btn_apply_settings = btn_apply
@@ -798,7 +837,10 @@ class MainWindow(QMainWindow):
         log_vbox.addWidget(self._reg_log, 1)
 
         btn_clear_rlog = QPushButton("Clear Log")
-        btn_clear_rlog.setFixedWidth(100)
+        btn_clear_rlog.setIcon(icon("mdi6.broom", NEUTRAL))
+        btn_clear_rlog.setIconSize(QSize(16, 16))
+        btn_clear_rlog.setToolTip("Clear the register read/write log")
+        btn_clear_rlog.setFixedWidth(120)
         btn_clear_rlog.clicked.connect(self._reg_log.clear)
         btns_row = QHBoxLayout()
         btns_row.addStretch(1)
@@ -822,7 +864,10 @@ class MainWindow(QMainWindow):
         btns = QHBoxLayout()
         btns.addStretch(1)
         btn_clear = QPushButton("Clear Log")
-        btn_clear.setFixedWidth(100)
+        btn_clear.setIcon(icon("mdi6.broom", NEUTRAL))
+        btn_clear.setIconSize(QSize(16, 16))
+        btn_clear.setToolTip("Clear the log")
+        btn_clear.setFixedWidth(120)
         btn_clear.clicked.connect(self._log_view.clear)
         btns.addWidget(btn_clear)
         vbox.addLayout(btns)
@@ -879,7 +924,11 @@ class MainWindow(QMainWindow):
     @Slot(bool)
     def _on_freeze_toggled(self, checked: bool) -> None:
         self._freeze = checked
-        self._btn_freeze.setText("Frozen" if checked else "Freeze")
+        self._btn_freeze.setIcon(icon("mdi6.snowflake", ON_COLOR if checked else NEUTRAL))
+        self._btn_freeze.setToolTip(
+            "Frozen — click to resume live updates" if checked
+            else "Freeze live plot/stats updates (the run keeps going)"
+        )
 
     def _connect_paths(self) -> list[str]:
         """Enabled, non-empty board paths from the Connect page rows."""
@@ -939,6 +988,7 @@ class MainWindow(QMainWindow):
         btn = self._btn_apply_settings
         btn.setProperty("dirty", "true" if dirty else "false")
         btn.setText("Apply to Engine  ●" if dirty else "Apply to Engine")
+        btn.setIcon(icon("mdi6.upload", ON_COLOR if dirty else "#90a4ae"))
         btn.style().unpolish(btn)
         btn.style().polish(btn)
 
@@ -1037,7 +1087,13 @@ class MainWindow(QMainWindow):
                                AcqState.EMPTYING)
 
         self._btn_connect.setEnabled(not op_busy)
-        self._btn_connect.setText("Disconnect" if connected else "Connect")
+        self._btn_connect.setIcon(icon(
+            "mdi6.lan-disconnect" if connected else "mdi6.lan-connect", ON_COLOR
+        ))
+        self._btn_connect.setToolTip(
+            "Disconnect from the boards" if connected
+            else "Apply config and connect to the boards"
+        )
         self._btn_start.setEnabled(state == AcqState.READY)
         self._btn_stop.setEnabled(state == AcqState.RUNNING)
         self._btn_freeze.setEnabled(state == AcqState.RUNNING)

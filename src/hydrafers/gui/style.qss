@@ -73,6 +73,12 @@ QLabel#SidebarFooter {
     padding: 10px 16px;
 }
 
+QFrame#SidebarFooterBox {
+    background: transparent;
+    border: none;
+    border-top: 1px solid #eceff1;
+}
+
 /* ----------------------------------------------------------- Page header */
 QFrame#PageHeader {
     background: #eceff1;
@@ -201,6 +207,18 @@ QPushButton#AccentButton {
 
 QPushButton#AccentButton:hover { background: #4caf50; }
 QPushButton#AccentButton:pressed { background: #2e7d32; }
+
+/* Icon-only toggle (Freeze): neutral when off, blue when active. */
+QPushButton#IconToggle {
+    background: #ffffff;
+    border: 1px solid #cfd8dc;
+    border-radius: 6px;
+}
+QPushButton#IconToggle:hover { background: #f1f5f9; }
+QPushButton#IconToggle:checked {
+    background: #1565c0;
+    border-color: #1565c0;
+}
 
 /* Apply button: neutral when in sync, orange when there are pending edits. */
 QPushButton#ApplyButton {

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -23,6 +23,10 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QVBoxLayout,
 )
+
+from hydrafers.gui.icons import NAV, icon
+
+_IMGS = Path(__file__).resolve().parent.parent / "imgs"
 
 
 class Sidebar(QFrame):
@@ -77,18 +81,46 @@ class Sidebar(QFrame):
 
         layout.addStretch(1)
 
-        self._footer = QLabel("Nuclear Instruments - CAEN")
-        self._footer.setObjectName("SidebarFooter")
-        self._footer.setWordWrap(True)
-        layout.addWidget(self._footer)
+        # Footer: the Nuclear Instruments and CAEN brand logos (replacing the
+        # former "Nuclear Instruments - CAEN" text).
+        footer = QFrame()
+        footer.setObjectName("SidebarFooterBox")
+        fbox = QVBoxLayout(footer)
+        fbox.setContentsMargins(14, 8, 14, 14)
+        fbox.setSpacing(8)
+        ni = self._logo_label("ni_logo.png", width=150)
+        caen = self._logo_label("caen_logo.png", width=110)
+        if ni is not None:
+            fbox.addWidget(ni, alignment=Qt.AlignmentFlag.AlignHCenter)
+        if caen is not None:
+            fbox.addWidget(caen, alignment=Qt.AlignmentFlag.AlignHCenter)
+        if ni is None and caen is None:
+            # fall back to text if the logo files are missing
+            self._footer = QLabel("Nuclear Instruments - CAEN")
+            self._footer.setObjectName("SidebarFooter")
+            self._footer.setWordWrap(True)
+            fbox.addWidget(self._footer)
+        layout.addWidget(footer)
+
+    @staticmethod
+    def _logo_label(filename: str, width: int) -> QLabel | None:
+        px = QPixmap(str(_IMGS / filename))
+        if px.isNull():
+            return None
+        lbl = QLabel()
+        lbl.setPixmap(px.scaledToWidth(width, Qt.TransformationMode.SmoothTransformation))
+        return lbl
 
     # ----------------------------------------------------------------- API
-    def add_page(self, label: str) -> int:
+    def add_page(self, label: str, icon_name: str | None = None) -> int:
         """Add a nav item labelled *label*; returns its 0-based page index."""
         index = len(self._buttons)
         btn = QPushButton(label)
         btn.setProperty("nav", True)
         btn.setCheckable(True)
+        if icon_name:
+            btn.setIcon(icon(icon_name, NAV))
+            btn.setIconSize(QSize(18, 18))
         btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn.clicked.connect(lambda _checked=False, i=index: self._on_clicked(i))
         self._group.addButton(btn, index)

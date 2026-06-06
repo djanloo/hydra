@@ -73,8 +73,14 @@ fi
 echo "==> Building AppImage…"
 mkdir -p "$ROOT/dist"
 OUT="$ROOT/dist/$APP-$ARCH.AppImage"
+# Build to a temp name, then atomically rename over OUT. Writing OUT directly
+# fails with "Text file busy" (ETXTBSY) if a previous AppImage is still running;
+# rename replaces the directory entry without opening the running file.
+OUT_TMP="$OUT.new.$$"
+rm -f "$OUT_TMP"
 # APPIMAGE_EXTRACT_AND_RUN avoids needing FUSE to run appimagetool itself.
-APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$ARCH" "$TOOL" "$APPDIR" "$OUT"
+APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$ARCH" "$TOOL" "$APPDIR" "$OUT_TMP"
+mv -f "$OUT_TMP" "$OUT"
 
 echo ""
 echo "==> Done:  $OUT"
