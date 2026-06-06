@@ -1,8 +1,17 @@
+## [0.0.4] - 2026-06-06
+
+### 🎨 Styling
+
+- Made the logo bigger
 ## [0.0.3] - 2026-06-06
 
 ### 🐛 Bug Fixes
 
 - *(ci)* Force QT_QPA_PLATFORM=offscreen during the AppImage build
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* V0.0.3
 ## [0.0.2] - 2026-06-06
 
 ### 🐛 Bug Fixes

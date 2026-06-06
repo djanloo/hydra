@@ -165,7 +165,7 @@ pythonpath = ["src", "build-debug"]
 # ferslib (native/ferslib) is vendored and intentionally NOT touched here.
 # ---------------------------------------------------------------------------
 [tool.bumpversion]
-current_version = "0.0.3"
+current_version = "0.0.4"
 allow_dirty = true
 commit = true
 message = "chore(release): v{new_version}"
