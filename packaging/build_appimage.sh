@@ -33,6 +33,14 @@ rm -rf "$ROOT/dist/hydrafers" "$ROOT/build/pyi"
     exit 1
 }
 
+# Sanity: a working GUI bundle MUST contain PySide6 (Qt). If it doesn't, the
+# build env was missing the [gui] extra and the AppImage would be tiny and fail
+# to start — catch that here instead of shipping a broken artifact.
+if ! ls -d "$ROOT"/dist/hydrafers/_internal/PySide6 >/dev/null 2>&1; then
+    echo "ERROR: PySide6 not bundled — did you 'pip install .[gui]' before building?" >&2
+    exit 1
+fi
+
 # --- 2. Assemble the AppDir ----------------------------------------------
 echo "==> Assembling AppDir…"
 APPDIR="$ROOT/build/AppDir"

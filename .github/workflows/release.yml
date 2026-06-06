@@ -31,7 +31,9 @@ jobs:
       - name: Build & install hydrafers (+ PyInstaller)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install . pyinstaller
+          # ".[gui]" pulls PySide6 / pyqtgraph / qtawesome so PyInstaller can
+          # actually bundle Qt — without the extra the bundle is tiny and won't start.
+          python -m pip install ".[gui]" pyinstaller
 
       - name: Build AppImage
         run: PYTHON="$(which python)" bash packaging/build_appimage.sh
@@ -55,7 +57,9 @@ jobs:
       - name: Build & install hydrafers (+ PyInstaller)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install . pyinstaller
+          # ".[gui]" pulls PySide6 / pyqtgraph / qtawesome so PyInstaller can
+          # actually bundle Qt — without the extra the bundle is tiny and won't start.
+          python -m pip install ".[gui]" pyinstaller
 
       - name: Run PyInstaller
         run: python -m PyInstaller --noconfirm --distpath dist --workpath build/pyi packaging/hydrafers.spec
