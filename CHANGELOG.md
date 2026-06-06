@@ -1,4 +1,13 @@
-## [unreleased]
+## [0.0.2] - 2026-06-06
+
+### 🐛 Bug Fixes
+
+- *(ci)* Install the [gui] extra so PyInstaller bundles Qt
+
+### ⚙️ Miscellaneous Tasks
+
+- Generate the changelog with git-cliff, synced to the tag
+## [0.0.1] - 2026-06-06
 
 ### 🚀 Features
 
@@ -10,6 +19,9 @@
 - Added git cliff for changelog
 - Added test scripts
 - Dynamic list for connected boards (gui)
+- Added make instructions for Windows (MSYS2/Chocolatey)
+- Added cross-platform compilation (MinGW) for pyfers
+- Added compression style for the configuration file (channel params now are default + exceptions)
 
 ### 🐛 Bug Fixes
 
@@ -17,6 +29,12 @@
 - Connection error w/o board (linux)
 - Corrected discriminator tab
 - Fixed install for pyferslib
+- PyInstaller spec missing due to .gitignore file
+- Link pyferslib against static ferslib on Windows
+
+### 💼 Other
+
+- Ignored build directories (whatever starts with build*)
 
 ### 🎨 Styling
 
@@ -25,3 +43,10 @@
 - Added HQ logos
 - Fixed arrows for selectors
 - Style for config "chip"
+- Adjusted CAEN logo
+
+### ⚙️ Miscellaneous Tasks
+
+- Track the mingw-w64 cross-build toolchain file
+- Add bump-my-version config for project-wide versioning
+- *(release)* V0.0.1

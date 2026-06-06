@@ -10,7 +10,7 @@ build-backend = "scikit_build_core.build"
 # ---------------------------------------------------------------------------
 [project]
 name        = "hydrafers"
-version     = "0.0.1"
+version     = "0.0.2"
 description = "HydraFERS — modern CAEN FERS/Janus DAQ software (Python + ferslib via pyfers)"
 readme      = "README.md"
 requires-python = ">=3.10"
@@ -165,7 +165,7 @@ pythonpath = ["src", "build-debug"]
 # ferslib (native/ferslib) is vendored and intentionally NOT touched here.
 # ---------------------------------------------------------------------------
 [tool.bumpversion]
-current_version = "0.0.1"
+current_version = "0.0.2"
 allow_dirty = true
 commit = true
 message = "chore(release): v{new_version}"
