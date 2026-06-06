@@ -63,7 +63,7 @@ Thumbs.db
 desktop.ini
 
 # PyInstaller
-*.spec
+# *.spec
 dist_standalone/
 
 # Test / coverage
