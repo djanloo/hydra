@@ -1,3 +1,8 @@
+## [0.0.3] - 2026-06-06
+
+### 🐛 Bug Fixes
+
+- *(ci)* Force QT_QPA_PLATFORM=offscreen during the AppImage build
 ## [0.0.2] - 2026-06-06
 
 ### 🐛 Bug Fixes
@@ -7,6 +12,7 @@
 ### ⚙️ Miscellaneous Tasks
 
 - Generate the changelog with git-cliff, synced to the tag
+- *(release)* V0.0.2
 ## [0.0.1] - 2026-06-06
 
 ### 🚀 Features
