@@ -25,7 +25,8 @@ out/
 # CMake generated files
 _deps/
 *.cmake
-!cmake/mingw-toolchain.cmake   # keep the vendored toolchain
+!cmake/mingw-toolchain.cmake               # keep the vendored toolchain
+!packaging/mingw-w64-toolchain.cmake       # keep the cross-build toolchain
 
 # Python packaging / build artefacts
 dist/
@@ -98,3 +99,4 @@ old_gui/
 FERSlib_Log.txt
 hydrafers.yaml
 build*/
+error_logs/

@@ -67,8 +67,9 @@ cmake -S "$ROOT" -B "$OUT" -G "Unix Makefiles" \
     -DPython_INCLUDE_DIR="$WINC" -DPython_LIBRARY="$WLIB" -DPython_VERSION="$PYVER" \
     -DPYTHON_MODULE_EXTENSION=.pyd \
     -DCMAKE_MODULE_LINKER_FLAGS="-L$WORK/stub" \
-    -DCMAKE_SHARED_LINKER_FLAGS="-L$WORK/stub" \
-    -DCMAKE_CXX_FLAGS="-D_CAEN_FERS_EXPORT"
+    -DCMAKE_SHARED_LINKER_FLAGS="-L$WORK/stub"
+    # NOTE: _CAEN_FERS_EXPORT is now set on the pyferslib target in CMakeLists.txt,
+    # so it no longer needs to be forced here.
 cmake --build "$OUT" --target pyferslib -- -j"$(nproc)"
 
 # --- 5. copy the GCC/C++ runtime DLLs next to the module ----------------------

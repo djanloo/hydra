@@ -122,7 +122,13 @@ if(BUILD_PYTHON_BINDINGS)
     target_link_libraries(pyferslib PRIVATE ferslib)
 
     if(WIN32)
-        target_compile_definitions(pyferslib PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+        # pyferslib links the FROZEN ferslib STATICALLY, so the FERS API headers
+        # must NOT be seen as __declspec(dllimport) (that expects __imp_* symbols
+        # from a DLL and yields LNK2001 unresolved externals). _CAEN_FERS_EXPORT
+        # makes the export macro expand so the declarations bind directly to the
+        # static symbols — mirroring the definition on the ferslib target above.
+        target_compile_definitions(pyferslib PRIVATE
+            NOMINMAX WIN32_LEAN_AND_MEAN _CAEN_FERS_EXPORT)
     endif()
 
     if(MINGW)
