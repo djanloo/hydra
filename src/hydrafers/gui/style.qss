@@ -79,6 +79,23 @@ QFrame#SidebarFooterBox {
     border-top: 1px solid #eceff1;
 }
 
+/* "Loaded from workspace" banner on the Connect page */
+QLabel#WorkspaceBanner {
+    background: #e8f5e9;
+    border: 1px solid #c8e6c9;
+    border-radius: 6px;
+    color: #2e7d32;
+    font-weight: 600;
+    padding: 8px 12px;
+}
+
+/* Section heading (icon + title) inside settings cards */
+QLabel#SectionHeading {
+    color: #607d8b;
+    font-size: 16px;
+    font-weight: 600;
+}
+
 /* ----------------------------------------------------------- Page header */
 QFrame#PageHeader {
     background: #eceff1;
