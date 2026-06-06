@@ -51,7 +51,7 @@ from .events import (
 )
 from .system import System
 
-__version__ = "1.0.0"
+__version__ = "0.0.1"
 
 # --- convenience re-export of pyferslib integer constants ---------------------
 # These are plain ints mirrored from FERSlib.h. Re-exporting them keeps the SDK
