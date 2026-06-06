@@ -5,13 +5,31 @@ SITE_PKG := $(shell $(PYTHON) -c "import site; print(site.getsitepackages()[0])"
 BUILD    := build-debug
 ROOT     := $(abspath .)
 
-.PHONY: all build dev-install appimage clean help
+.PHONY: all build dev-install appimage exe clean help
 
 all: build dev-install   ## Build extension + register in venv (default)
 
 appimage:                ## Bundle the GUI into a self-contained Linux .AppImage
 	@$(PYTHON) -m pip show pyinstaller >/dev/null 2>&1 || $(PYTHON) -m pip install pyinstaller
 	PYTHON='$(PYTHON)' bash packaging/build_appimage.sh
+
+exe:                     ## Build the Windows .exe — run this ON Windows (INSTALLER=1 also makes the setup)
+ifeq ($(OS),Windows_NT)
+	packaging\build_windows.bat $(if $(INSTALLER),installer,)
+else
+	@echo "The Windows .exe cannot be cross-compiled (pyferslib is a compiled C++"
+	@echo "extension), so build it ON a Windows machine. Prerequisites there:"
+	@echo "  * Python 3.10-3.12 (the 'py' launcher)"
+	@echo "  * CMake on PATH"
+	@echo "  * Visual Studio Build Tools  ->  Desktop development with C++"
+	@echo ""
+	@echo "Then, from the repo root on Windows, run EITHER:"
+	@echo "    packaging/build_windows.bat              (simplest: no make needed)"
+	@echo "    packaging/build_windows.bat installer    (also builds the Inno Setup installer)"
+	@echo "  or, if GNU make is installed there:"
+	@echo "    make exe              produces  dist/hydrafers/hydrafers.exe"
+	@echo "    make exe INSTALLER=1  also       dist/HydraFERS-Setup-1.0.0.exe"
+endif
 
 build:                   ## (Re)build the pyferslib C++ extension
 	cmake --build $(BUILD) --target pyferslib -- -j$$(nproc)
