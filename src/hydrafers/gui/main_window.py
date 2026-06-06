@@ -70,20 +70,20 @@ from hydrafers.gui.widgets.status_table import StatusBadge, StatusTable
 logger = logging.getLogger("hydrafers.gui.main_window")
 
 _REFRESH_MS = 66   # ~15 Hz poll
-_MAX_BOARDS = 8    # rows shown in Connect page
+_MAX_BOARDS = 16   # safety cap on dynamically-added Connect rows
 
 # Sidebar / stack page indices (single source of truth).
-(PG_CONNECT, PG_SETTINGS, PG_OVERVIEW, PG_STATS,
- PG_SPECTRA, PG_MAP, PG_HV, PG_REGS, PG_LOG) = range(9)
+(PG_CONNECT, PG_SETTINGS, PG_RUNSTATS,
+ PG_SPECTRA, PG_MAP, PG_HV, PG_REGS, PG_LOG) = range(8)
 
 _PAGE_NAMES = [
-    "Connect", "Settings", "Overview", "Statistics",
+    "Connect", "Settings", "Run Statistics",
     "Spectra", "Map 2D", "HV / Temps", "Registers", "Log",
 ]
 
 # Material Design icon per nav page (aligned with _PAGE_NAMES).
 _PAGE_ICONS = [
-    "mdi6.lan-connect", "mdi6.cog", "mdi6.view-dashboard", "mdi6.chart-bar",
+    "mdi6.lan-connect", "mdi6.cog", "mdi6.chart-box",
     "mdi6.chart-line", "mdi6.grid", "mdi6.thermometer", "mdi6.memory",
     "mdi6.text-box-outline",
 ]
@@ -203,7 +203,7 @@ class MainWindow(QMainWindow):
             tuple[QCheckBox, QLineEdit, QLabel, QLabel, QLabel]
         ] = []
 
-        # 64 QLabels for the statistics grid (filled in _build_statistics_page)
+        # 64 QLabels for the statistics grid (filled in _build_run_statistics_page)
         self._ch_labels: list[QLabel] = []
 
         # Per-board HV card dicts {led, hv_btn, vmon, imon, t_fpga, t_board, t_hv, t_det}
@@ -260,8 +260,7 @@ class MainWindow(QMainWindow):
         for builder in [
             self._build_connect_page,
             self._build_settings_page,
-            self._build_overview_page,
-            self._build_statistics_page,
+            self._build_run_statistics_page,
             self._build_spectra_page,
             self._build_map2d_page,
             self._build_hv_page,
@@ -396,50 +395,6 @@ class MainWindow(QMainWindow):
         vbox.setContentsMargins(20, 16, 20, 16)
         vbox.setSpacing(16)
 
-        # --- "Loaded from workspace" banner (only when ./hydrafers.yaml was found) ---
-        if self._loaded_from_workspace:
-            banner = QLabel()
-            banner.setObjectName("WorkspaceBanner")
-            banner.setText(
-                "  ✓  Loaded from workspace: "
-                f"{self._config_path.name if self._config_path else 'hydrafers.yaml'}"
-            )
-            if self._config_path:
-                banner.setToolTip(str(self._config_path))
-            vbox.addWidget(banner)
-
-        # --- Config file card ---
-        cfg_card = QFrame()
-        cfg_card.setObjectName("Card")
-        cfg_vbox = QVBoxLayout(cfg_card)
-        cfg_vbox.setContentsMargins(16, 12, 16, 12)
-        cfg_vbox.setSpacing(8)
-
-        cfg_title = QLabel("Configuration File")
-        cfg_title.setObjectName("CardTitle")
-        cfg_vbox.addWidget(cfg_title)
-
-        cfg_row = QHBoxLayout()
-        self._cfg_path_label = QLabel(
-            str(self._config_path) if self._config_path else "(built-in defaults)"
-        )
-        self._cfg_path_label.setObjectName("FieldValue")
-        cfg_row.addWidget(self._cfg_path_label, 1)
-        btn_load = QPushButton("Load Config…")
-        btn_load.setIcon(icon("mdi6.folder-open", NEUTRAL))
-        btn_load.setIconSize(QSize(16, 16))
-        btn_load.setToolTip("Load a configuration from a YAML file")
-        btn_load.clicked.connect(self._menu_load_config)
-        cfg_row.addWidget(btn_load)
-        btn_save = QPushButton("Save Config As…")
-        btn_save.setIcon(icon("mdi6.content-save", NEUTRAL))
-        btn_save.setIconSize(QSize(16, 16))
-        btn_save.setToolTip("Save the current configuration to a YAML file")
-        btn_save.clicked.connect(self._menu_save_config)
-        cfg_row.addWidget(btn_save)
-        cfg_vbox.addLayout(cfg_row)
-        vbox.addWidget(cfg_card)
-
         # --- Board connections card ---
         brd_card = QFrame()
         brd_card.setObjectName("Card")
@@ -471,52 +426,132 @@ class MainWindow(QMainWindow):
         hdr_row.addStretch(1)
         brd_vbox.addLayout(hdr_row)
 
-        initial_boards = self._config.boards if self._config else []
+        # Dynamic rows live in their own layout; rows are added on demand.
+        self._board_rows_layout = QVBoxLayout()
+        self._board_rows_layout.setContentsMargins(0, 0, 0, 0)
+        self._board_rows_layout.setSpacing(6)
+        brd_vbox.addLayout(self._board_rows_layout)
         self._board_path_rows = []
 
-        for i in range(_MAX_BOARDS):
-            brow = QHBoxLayout()
-            brow.setSpacing(8)
+        # Seed from the active config (one enabled row per board), then make sure
+        # there is one empty trailing row to grow into.
+        for board in (self._config.boards if self._config else []):
+            self._add_board_row(path=board.Open, enabled=True)
+        self._ensure_trailing_empty_row()
 
-            num_lbl = QLabel(str(i))
-            num_lbl.setObjectName("FieldLabel")
-            num_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            num_lbl.setFixedWidth(36)
-            brow.addWidget(num_lbl)
-
-            enable_cb = QCheckBox()
-            enable_cb.setFixedWidth(36)
-            enable_cb.setChecked(i < len(initial_boards))
-            brow.addWidget(enable_cb)
-
-            path_edit = QLineEdit()
-            path_edit.setFixedWidth(300)
-            path_edit.setPlaceholderText("eth:192.168.50.3  or  usb:0")
-            if i < len(initial_boards):
-                path_edit.setText(initial_boards[i].Open)
-            brow.addWidget(path_edit)
-
-            enable_cb.toggled.connect(self._sync_board_count)
-            path_edit.editingFinished.connect(self._sync_board_count)
-            enable_cb.toggled.connect(self._mark_dirty)
-            path_edit.textEdited.connect(self._mark_dirty)
-
-            pid_lbl   = QLabel("—"); pid_lbl.setFixedWidth(80);   pid_lbl.setObjectName("FieldValue")
-            model_lbl = QLabel("—"); model_lbl.setFixedWidth(130); model_lbl.setObjectName("FieldValue")
-            fw_lbl    = QLabel("—"); fw_lbl.setFixedWidth(180);   fw_lbl.setObjectName("FieldValue")
-            brow.addWidget(pid_lbl)
-            brow.addWidget(model_lbl)
-            brow.addWidget(fw_lbl)
-            brow.addStretch(1)
-
-            self._board_path_rows.append((enable_cb, path_edit, pid_lbl, model_lbl, fw_lbl))
-            brd_vbox.addLayout(brow)
+        # "Add board" button under the rows.
+        add_row = QHBoxLayout()
+        self._btn_add_board = QPushButton("Add board")
+        self._btn_add_board.setIcon(icon("mdi6.plus", NEUTRAL))
+        self._btn_add_board.setIconSize(QSize(16, 16))
+        self._btn_add_board.setToolTip("Add another board connection row")
+        self._btn_add_board.clicked.connect(lambda: self._add_board_row())
+        add_row.addWidget(self._btn_add_board)
+        add_row.addStretch(1)
+        brd_vbox.addLayout(add_row)
 
         vbox.addWidget(brd_card)
         vbox.addStretch(1)
 
         scroll.setWidget(inner)
         return scroll
+
+    # ----------------------------------------------------------- board rows
+    def _add_board_row(self, path: str = "", enabled: bool = False):
+        """Append one board-connection row; returns its widget tuple."""
+        if len(self._board_path_rows) >= _MAX_BOARDS:
+            return None
+
+        row = QWidget()
+        brow = QHBoxLayout(row)
+        brow.setContentsMargins(0, 0, 0, 0)
+        brow.setSpacing(8)
+
+        num_lbl = QLabel("")
+        num_lbl.setObjectName("FieldLabel")
+        num_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        num_lbl.setFixedWidth(36)
+        brow.addWidget(num_lbl)
+
+        enable_cb = QCheckBox()
+        enable_cb.setFixedWidth(36)
+        path_edit = QLineEdit()
+        path_edit.setFixedWidth(300)
+        path_edit.setPlaceholderText("eth:192.168.50.3  or  usb:0")
+
+        # Set initial state BEFORE wiring signals so seeding doesn't fire handlers.
+        enable_cb.setChecked(enabled)
+        path_edit.setText(path)
+
+        brow.addWidget(enable_cb)
+        brow.addWidget(path_edit)
+
+        pid_lbl   = QLabel("—"); pid_lbl.setFixedWidth(80);   pid_lbl.setObjectName("FieldValue")
+        model_lbl = QLabel("—"); model_lbl.setFixedWidth(130); model_lbl.setObjectName("FieldValue")
+        fw_lbl    = QLabel("—"); fw_lbl.setFixedWidth(180);   fw_lbl.setObjectName("FieldValue")
+        brow.addWidget(pid_lbl)
+        brow.addWidget(model_lbl)
+        brow.addWidget(fw_lbl)
+        brow.addStretch(1)
+
+        remove_btn = QPushButton()
+        remove_btn.setIcon(icon("mdi6.close", NEUTRAL))
+        remove_btn.setIconSize(QSize(14, 14))
+        remove_btn.setFixedSize(QSize(26, 26))
+        remove_btn.setToolTip("Remove this row")
+        remove_btn.clicked.connect(lambda _=False, r=row: self._remove_board_row(r))
+        brow.addWidget(remove_btn)
+
+        # Keep references for renumber / editable-state toggling.
+        row._num_lbl = num_lbl
+        row._remove_btn = remove_btn
+
+        # Wiring: activating a row (enable or a typed path) grows a new trailing row.
+        enable_cb.toggled.connect(self._ensure_trailing_empty_row)
+        enable_cb.toggled.connect(self._sync_board_count)
+        enable_cb.toggled.connect(self._mark_dirty)
+        path_edit.editingFinished.connect(self._ensure_trailing_empty_row)
+        path_edit.editingFinished.connect(self._sync_board_count)
+        path_edit.textEdited.connect(self._mark_dirty)
+
+        self._board_path_rows.append(
+            (enable_cb, path_edit, pid_lbl, model_lbl, fw_lbl, row)
+        )
+        self._board_rows_layout.addWidget(row)
+        self._renumber_board_rows()
+        return self._board_path_rows[-1]
+
+    def _ensure_trailing_empty_row(self) -> None:
+        """Guarantee exactly one empty (disabled, blank) row at the bottom."""
+        if len(self._board_path_rows) >= _MAX_BOARDS:
+            return
+        if self._board_path_rows:
+            enable_cb, path_edit, *_ = self._board_path_rows[-1]
+            if not (enable_cb.isChecked() or path_edit.text().strip()):
+                return
+        self._add_board_row()
+
+    def _remove_board_row(self, row: QWidget) -> None:
+        """Remove a row (keeping at least one), then renumber and resync."""
+        if len(self._board_path_rows) <= 1:
+            return
+        for i, tup in enumerate(self._board_path_rows):
+            if tup[5] is row:
+                self._board_path_rows.pop(i)
+                break
+        else:
+            return
+        self._board_rows_layout.removeWidget(row)
+        row.setParent(None)
+        row.deleteLater()
+        self._renumber_board_rows()
+        self._ensure_trailing_empty_row()
+        self._sync_board_count()
+        self._mark_dirty()
+
+    def _renumber_board_rows(self) -> None:
+        for i, (_cb, _pe, _pid, _model, _fw, row) in enumerate(self._board_path_rows):
+            row._num_lbl.setText(str(i))
 
     def _build_settings_page(self) -> QWidget:
         page = QWidget()
@@ -547,9 +582,31 @@ class MainWindow(QMainWindow):
         bar.setFixedHeight(52)
         brow = QHBoxLayout(bar)
         brow.setContentsMargins(16, 8, 16, 8)
-        hint = QLabel("Edit parameters, then apply to the running engine or save to file.")
-        hint.setObjectName("FieldLabel")
-        brow.addWidget(hint)
+        brow.setSpacing(8)
+
+        # Compact config-file control: a chip showing the current file (green +
+        # check when loaded from a file, grey for built-in defaults) plus small
+        # icon-only Load / Save buttons.
+        brow.addWidget(QLabel("Config:"))
+        self._config_chip = QLabel()
+        self._config_chip.setObjectName("ConfigChip")
+        brow.addWidget(self._config_chip)
+        btn_load = QPushButton()
+        btn_load.setIcon(icon("mdi6.folder-open", NEUTRAL))
+        btn_load.setIconSize(QSize(16, 16))
+        btn_load.setFixedSize(QSize(32, 30))
+        btn_load.setToolTip("Load configuration from a YAML file")
+        btn_load.clicked.connect(self._menu_load_config)
+        brow.addWidget(btn_load)
+        btn_save = QPushButton()
+        btn_save.setIcon(icon("mdi6.content-save", NEUTRAL))
+        btn_save.setIconSize(QSize(16, 16))
+        btn_save.setFixedSize(QSize(32, 30))
+        btn_save.setToolTip("Save the current configuration to a YAML file")
+        btn_save.clicked.connect(self._menu_save_config)
+        brow.addWidget(btn_save)
+        self._update_config_chip()
+
         brow.addStretch(1)
         btn_revert = QPushButton("Revert")
         btn_revert.setIcon(icon("mdi6.undo", NEUTRAL))
@@ -602,16 +659,19 @@ class MainWindow(QMainWindow):
         scroll.setWidget(container)
         return scroll
 
-    def _build_overview_page(self) -> QWidget:
+    def _build_run_statistics_page(self) -> QWidget:
+        """Merged Overview + Statistics: run totals, per-board throughput, the
+        per-channel rate/count grid and the all-boards summary, on one page."""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
 
         inner = QWidget()
-        self._overview_layout = QVBoxLayout(inner)
-        self._overview_layout.setContentsMargins(20, 16, 20, 16)
-        self._overview_layout.setSpacing(12)
+        vbox = QVBoxLayout(inner)
+        vbox.setContentsMargins(20, 16, 20, 16)
+        vbox.setSpacing(12)
 
+        # --- run totals card ---
         self._stats_card = StatusTable("Run Statistics")
         self._stats_card.add_row("run_number",   "Run #",        "—")
         self._stats_card.add_row("elapsed",       "Elapsed",      "—")
@@ -620,26 +680,17 @@ class MainWindow(QMainWindow):
         self._stats_card.add_row("event_rate",    "Event rate",   "—")
         self._stats_card.add_row("data_volume",   "Data volume",  "—")
         self._stats_card.add_row("data_rate",     "Data rate",    "—")
-        self._overview_layout.addWidget(self._stats_card)
+        vbox.addWidget(self._stats_card)
 
+        # --- per-board throughput cards (filled on connect) ---
         self._board_cards_widget = QWidget()
         self._board_cards_layout = QVBoxLayout(self._board_cards_widget)
         self._board_cards_layout.setContentsMargins(0, 0, 0, 0)
         self._board_cards_layout.setSpacing(12)
         self._board_cards: list[StatusTable] = []
-        self._overview_layout.addWidget(self._board_cards_widget)
-        self._overview_layout.addStretch(1)
+        vbox.addWidget(self._board_cards_widget)
 
-        scroll.setWidget(inner)
-        return scroll
-
-    def _build_statistics_page(self) -> QWidget:
-        page = QWidget()
-        vbox = QVBoxLayout(page)
-        vbox.setContentsMargins(20, 12, 20, 12)
-        vbox.setSpacing(10)
-
-        # Controls row
+        # --- per-channel rate/count controls ---
         ctrl = QHBoxLayout()
         ctrl.setSpacing(12)
         ctrl.addWidget(QLabel("Board:"))
@@ -653,7 +704,7 @@ class MainWindow(QMainWindow):
         ctrl.addStretch(1)
         vbox.addLayout(ctrl)
 
-        # 8×8 channel grid
+        # --- 8×8 channel grid ---
         grid_card = QFrame()
         grid_card.setObjectName("Card")
         grid_outer = QVBoxLayout(grid_card)
@@ -695,9 +746,9 @@ class MainWindow(QMainWindow):
                 self._ch_labels.append(lbl)
             grid_outer.addLayout(rbox)
 
-        vbox.addWidget(grid_card, 1)
+        vbox.addWidget(grid_card)
 
-        # All-boards summary
+        # --- all-boards summary ---
         sum_card = QFrame()
         sum_card.setObjectName("Card")
         sum_vbox = QVBoxLayout(sum_card)
@@ -718,7 +769,9 @@ class MainWindow(QMainWindow):
         sum_vbox.addWidget(self._all_brd_table)
         vbox.addWidget(sum_card)
 
-        return page
+        vbox.addStretch(1)
+        scroll.setWidget(inner)
+        return scroll
 
     def _build_spectra_page(self) -> QWidget:
         page = QWidget()
@@ -1057,6 +1110,26 @@ class MainWindow(QMainWindow):
     def _mark_clean(self) -> None:
         self._set_dirty(False)
 
+    def _update_config_chip(self) -> None:
+        """Reflect the active config source in the Settings config chip.
+
+        Green chip with a check when the config came from a file (loaded or
+        saved); neutral grey "built-in defaults" otherwise.
+        """
+        if not hasattr(self, "_config_chip"):
+            return
+        chip = self._config_chip
+        if self._config_path is not None:
+            chip.setText(f"✓  {self._config_path.name}")
+            chip.setToolTip(str(self._config_path))
+            chip.setProperty("loaded", "true")
+        else:
+            chip.setText("built-in defaults")
+            chip.setToolTip("No file loaded — using the bundled default configuration")
+            chip.setProperty("loaded", "false")
+        chip.style().unpolish(chip)
+        chip.style().polish(chip)
+
     @Slot()
     def _apply_settings(self) -> None:
         try:
@@ -1156,25 +1229,38 @@ class MainWindow(QMainWindow):
         self._btn_stop.setEnabled(state == AcqState.RUNNING)
         self._btn_freeze.setEnabled(state == AcqState.RUNNING)
 
-        # Board path rows editable only when disconnected
+        # Board rows editable / add-removable only when disconnected
         editable = (state == AcqState.DISCONNECTED or state == AcqState.ERROR)
-        for enable_cb, path_edit, *_ in self._board_path_rows:
+        for enable_cb, path_edit, _pid, _model, _fw, row in self._board_path_rows:
             path_edit.setReadOnly(not editable)
             enable_cb.setEnabled(editable)
+            row._remove_btn.setEnabled(editable)
+        if hasattr(self, "_btn_add_board"):
+            self._btn_add_board.setEnabled(editable)
 
     # ================================================================ Connect page helpers
 
+    def _active_board_rows(self) -> list[tuple]:
+        """Rows that define a real board (enabled + non-empty path), in order."""
+        return [
+            tup for tup in self._board_path_rows
+            if tup[0].isChecked() and tup[1].text().strip()
+        ]
+
     def _populate_connect_board_info(self, statuses: list[BoardStatus]) -> None:
-        for st in statuses:
-            if st.index >= len(self._board_path_rows):
-                continue
-            _, _, pid_lbl, model_lbl, fw_lbl = self._board_path_rows[st.index]
+        # Board index k corresponds to the k-th active row (same order as
+        # _connect_paths builds the boards list).
+        active = self._active_board_rows()
+        for k, st in enumerate(statuses):
+            if k >= len(active):
+                break
+            _cb, _pe, pid_lbl, model_lbl, fw_lbl, _row = active[k]
             pid_lbl.setText(f"0x{st.pid:04X}" if st.pid else "—")
             model_lbl.setText(st.model_name or "—")
             fw_lbl.setText(st.fpga_fw or "—")
 
     def _clear_connect_board_info(self) -> None:
-        for _, _, pid_lbl, model_lbl, fw_lbl in self._board_path_rows:
+        for _cb, _pe, pid_lbl, model_lbl, fw_lbl, _row in self._board_path_rows:
             for lbl in (pid_lbl, model_lbl, fw_lbl):
                 lbl.setText("—")
 
@@ -1430,7 +1516,8 @@ class MainWindow(QMainWindow):
             cfg = load_config(path)
             self._config = cfg
             self._config_path = Path(path)
-            self._cfg_path_label.setText(str(self._config_path))
+            self._loaded_from_workspace = False
+            self._update_config_chip()
             self._refresh_board_path_rows()
             self._populate_forms(cfg)
             self._append_log("info", f"Loaded config: {path}")
@@ -1453,7 +1540,7 @@ class MainWindow(QMainWindow):
         try:
             save_config(self._config, path)
             self._config_path = Path(path)
-            self._cfg_path_label.setText(str(self._config_path))
+            self._update_config_chip()
             self._mark_clean()
             self._append_log("info", f"Saved config: {path}")
         except Exception as exc:
@@ -1470,15 +1557,15 @@ class MainWindow(QMainWindow):
         )
 
     def _refresh_board_path_rows(self) -> None:
-        """Push current config board paths into the UI rows."""
-        boards = self._config.boards if self._config else []
-        for i, (enable_cb, path_edit, *_) in enumerate(self._board_path_rows):
-            if i < len(boards):
-                path_edit.setText(boards[i].Open)
-                enable_cb.setChecked(True)
-            else:
-                path_edit.clear()
-                enable_cb.setChecked(False)
+        """Rebuild the dynamic board rows from the active config."""
+        for _cb, _pe, _pid, _model, _fw, row in self._board_path_rows:
+            self._board_rows_layout.removeWidget(row)
+            row.setParent(None)
+            row.deleteLater()
+        self._board_path_rows.clear()
+        for board in (self._config.boards if self._config else []):
+            self._add_board_row(path=board.Open, enabled=True)
+        self._ensure_trailing_empty_row()
 
     # ================================================================ tick (15 Hz)
 
@@ -1490,7 +1577,7 @@ class MainWindow(QMainWindow):
 
         if self._engine.state == AcqState.RUNNING and not self._freeze:
             page = self._stack.currentIndex()
-            if page == PG_STATS:
+            if page == PG_RUNSTATS:
                 if stats is not None:
                     self._update_ch_grid(stats)
                     self._update_all_boards_table(stats)
