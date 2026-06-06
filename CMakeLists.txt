@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(hydrafers VERSION 0.0.3 LANGUAGES C CXX)
+project(hydrafers VERSION 0.0.4 LANGUAGES C CXX)
 
 # -------------------------
 # C/C++ standards

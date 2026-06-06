@@ -62,9 +62,9 @@ class Sidebar(QFrame):
             if not px.isNull():
                 logo_lbl = QLabel()
                 logo_lbl.setPixmap(
-                    px.scaledToHeight(30, Qt.TransformationMode.SmoothTransformation)
+                    px.scaledToHeight(50, Qt.TransformationMode.SmoothTransformation)
                 )
-                logo_lbl.setFixedHeight(34)
+                logo_lbl.setFixedHeight(54)
                 brand_row.addWidget(logo_lbl)
 
         brand_label = QLabel(brand)

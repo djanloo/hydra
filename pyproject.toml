@@ -10,7 +10,7 @@ build-backend = "scikit_build_core.build"
 # ---------------------------------------------------------------------------
 [project]
 name        = "hydrafers"
-version     = "0.0.3"
+version     = "0.0.4"
 description = "HydraFERS — modern CAEN FERS/Janus DAQ software (Python + ferslib via pyfers)"
 readme      = "README.md"
 requires-python = ">=3.10"
