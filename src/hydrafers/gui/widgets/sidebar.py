@@ -89,11 +89,11 @@ class Sidebar(QFrame):
         fbox.setContentsMargins(14, 8, 14, 14)
         fbox.setSpacing(8)
         ni = self._logo_label("ni_logo.png", width=150)
-        caen = self._logo_label("caen_logo.png", width=110)
-        if ni is not None:
-            fbox.addWidget(ni, alignment=Qt.AlignmentFlag.AlignHCenter)
+        caen = self._logo_label("caen_logo.png", width=150)
         if caen is not None:
             fbox.addWidget(caen, alignment=Qt.AlignmentFlag.AlignHCenter)
+        if ni is not None:
+            fbox.addWidget(ni, alignment=Qt.AlignmentFlag.AlignHCenter)
         if ni is None and caen is None:
             # fall back to text if the logo files are missing
             self._footer = QLabel("Nuclear Instruments - CAEN")

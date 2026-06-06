@@ -5,19 +5,25 @@ from a compact field-spec table, so the GUI exposes the SAME parameter surface a
 the legacy Janus tabs (AcqMode, Discr, Spectroscopy, RunCtrl, Output, HV, Test-Probe)
 plus per-board / per-channel overrides.
 
-Two public widgets:
-    * :class:`SectionForm`        — a grid of labelled inputs bound to one global
+Public widgets / models:
+    * :class:`SectionForm`     — a grid of labelled inputs bound to one global
       section model (e.g. ``acq_mode``); ``load(model)`` fills it, ``values()``
-      returns a dict suitable for ``model_copy(update=…)``.
-    * :class:`BoardSettingsForm`  — per-board scalar overrides + per-channel array
-      editing (broadcast value + an 8×8 per-channel dialog).
+      returns a dict suitable for the section constructor.
+    * :class:`BoardParams`     — shared per-board parameter model (single source
+      of truth for the board/channel dicts and the selected board index).
+    * :class:`BoardScopeForm`  — one section's per-board scalars + per-channel
+      arrays (broadcast value + an 8×8 dialog), all bound to a ``BoardParams``.
+
+The board/channel params for each section (``BOARD_SCALARS`` / ``CHANNEL_ARRAYS``)
+live on that section's own settings tab, next to its global params — matching the
+legacy Janus tab layout rather than a separate catch-all tab.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -31,7 +37,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -347,28 +352,37 @@ def _widget_value(w: QWidget, spec: FieldSpec):
 # ---------------------------------------------------------------------------
 # SectionForm — one global config section
 # ---------------------------------------------------------------------------
-class SectionForm(QScrollArea):
-    """Editable form bound to one global section model (e.g. ``acq_mode``)."""
+class SectionForm(QWidget):
+    """Editable form bound to one global section model (e.g. ``acq_mode``).
+
+    A plain widget (one ``#Card`` with a 2-column grid) so it can be stacked
+    above per-board params inside a single scroll area on a settings tab.
+    """
 
     #: Emitted when the user edits any field (not while ``load`` is filling it).
     changed = Signal()
 
-    def __init__(self, specs: list[FieldSpec], parent: QWidget | None = None) -> None:
+    def __init__(self, specs: list[FieldSpec], title: str = "Global Parameters",
+                 parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWidgetResizable(True)
-        self.setFrameShape(QFrame.Shape.NoFrame)
         self._specs = specs
         self._widgets: dict[str, QWidget] = {}
         self._suppress = False
 
-        inner = QWidget()
-        outer = QVBoxLayout(inner)
-        outer.setContentsMargins(16, 14, 16, 14)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
 
         card = QFrame()
         card.setObjectName("Card")
-        grid = QGridLayout(card)
-        grid.setContentsMargins(18, 14, 18, 14)
+        cv = QVBoxLayout(card)
+        cv.setContentsMargins(18, 12, 18, 14)
+        cv.setSpacing(8)
+        head = QLabel(title)
+        head.setObjectName("CardTitle")
+        cv.addWidget(head)
+
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(18)
         grid.setVerticalSpacing(10)
 
@@ -390,10 +404,9 @@ class SectionForm(QScrollArea):
             grid.addWidget(w, row, col + 1)
         grid.setColumnStretch(1, 1)
         grid.setColumnStretch(3, 1)
+        cv.addLayout(grid)
 
         outer.addWidget(card)
-        outer.addStretch(1)
-        self.setWidget(inner)
 
     def _emit_changed(self, *_) -> None:
         if not self._suppress:
@@ -481,237 +494,280 @@ class ChannelArrayDialog(QDialog):
 
 
 # ---------------------------------------------------------------------------
-# BoardSettingsForm — per-board scalars + per-channel arrays
+# Per-board / per-channel parameter groupings, BY SECTION.
+# These live on each functional settings tab (matching the legacy Janus tabs),
+# next to that section's global params — NOT in a separate catch-all tab.
 # ---------------------------------------------------------------------------
-# Per-channel arrays: (key, label, lo, hi)
-_CHANNEL_ARRAYS = [
-    ("HV_IndivAdj", "HV Individual Adjust", 0, 255),
-    ("TD_FineThreshold", "Timing Fine Threshold", 0, 15),
-    ("QD_FineThreshold", "Charge Fine Threshold", 0, 4095),
-    ("HG_Gain", "High Gain", 1, 63),
-    ("LG_Gain", "Low Gain", 1, 63),
-    ("ZS_Threshold_LG", "ZS Threshold LG", 0, 65535),
-    ("ZS_Threshold_HG", "ZS Threshold HG", 0, 65535),
-]
+# Per-board scalar overrides (Open is owned by the Connect page).
+BOARD_SCALARS: dict[str, list[FieldSpec]] = {
+    "acq_mode": [
+        hexmask("ChEnableMask0", "Ch Enable Mask 0", "Channel enable mask, ch 0–31 (hex)"),
+        hexmask("ChEnableMask1", "Ch Enable Mask 1", "Channel enable mask, ch 32–63 (hex)"),
+    ],
+    "discr": [
+        integer("TD_CoarseThreshold", "Timing Coarse Threshold", 0, 2047,
+                "Timing discriminator coarse threshold (all channels)"),
+        hexmask("Tlogic_Mask0", "Tlogic Mask 0", "Trigger-logic mask, ch 0–31 (hex)"),
+        hexmask("Tlogic_Mask1", "Tlogic Mask 1", "Trigger-logic mask, ch 32–63 (hex)"),
+        hexmask("Q_DiscrMask0", "Q-OR Mask 0", "Q-OR mask, ch 0–31 (hex)"),
+        hexmask("Q_DiscrMask1", "Q-OR Mask 1", "Q-OR mask, ch 32–63 (hex)"),
+    ],
+    "hv_bias": [
+        unit("HV_Vbias", "HV Vbias", "Bias voltage (range 20–85 V)"),
+        unit("HV_Imax", "HV Imax", "Max HV current before shutdown"),
+    ],
+}
 
-# Per-board scalar fields (excluding Open, which the Connect page owns).
-_BOARD_SCALARS = [
-    unit("HV_Vbias", "HV Vbias", "Bias voltage (range 20–85 V)"),
-    unit("HV_Imax", "HV Imax", "Max HV current before shutdown"),
-    hexmask("ChEnableMask0", "Ch Enable Mask 0", "Channel enable mask, ch 0–31 (hex)"),
-    hexmask("ChEnableMask1", "Ch Enable Mask 1", "Channel enable mask, ch 32–63 (hex)"),
-    integer("TD_CoarseThreshold", "Timing Coarse Threshold", 0, 2047,
-            "Timing discriminator coarse threshold (all channels)"),
-    hexmask("Tlogic_Mask0", "Tlogic Mask 0", "Trigger-logic mask, ch 0–31 (hex)"),
-    hexmask("Tlogic_Mask1", "Tlogic Mask 1", "Trigger-logic mask, ch 32–63 (hex)"),
-    hexmask("Q_DiscrMask0", "Q-OR Mask 0", "Q-OR mask, ch 0–31 (hex)"),
-    hexmask("Q_DiscrMask1", "Q-OR Mask 1", "Q-OR mask, ch 32–63 (hex)"),
-]
+# Per-channel arrays: (key, label, lo, hi).
+CHANNEL_ARRAYS: dict[str, list[tuple[str, str, int, int]]] = {
+    "discr": [
+        ("TD_FineThreshold", "Timing Fine Threshold", 0, 15),
+        ("QD_FineThreshold", "Charge Fine Threshold", 0, 4095),
+    ],
+    "spectroscopy": [
+        ("HG_Gain", "High Gain", 1, 63),
+        ("LG_Gain", "Low Gain", 1, 63),
+        ("ZS_Threshold_LG", "ZS Threshold LG", 0, 65535),
+        ("ZS_Threshold_HG", "ZS Threshold HG", 0, 65535),
+    ],
+    "hv_bias": [
+        ("HV_IndivAdj", "HV Individual Adjust", 0, 255),
+    ],
+}
 
 
-class BoardSettingsForm(QWidget):
-    """Per-board override editor: a board selector, scalar fields, and per-channel
-    array editors (broadcast value + an 8×8 dialog).
+def _default_board_dict() -> dict:
+    d = BoardConfig().model_dump()
+    d.pop("Open", None)
+    return d
 
-    Holds an internal list of board-parameter dicts (everything except ``Open``,
-    which the Connect page owns). ``set_count`` grows/shrinks that list; the form
-    flushes the visible board before switching selection.
+
+class BoardParams(QObject):
+    """Shared per-board parameter model (single source of truth).
+
+    Holds the list of per-board dicts (everything except ``Open``) plus the
+    currently-selected board index. Many :class:`BoardScopeForm` instances — one
+    per settings tab — bind to it, so changing the board in one tab updates them
+    all, and they all read/write the same dicts.
     """
 
-    #: Emitted when the user edits any board/channel field.
-    changed = Signal()
+    board_changed = Signal(int)
+    count_changed = Signal(int)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._boards: list[dict] = [self._default_dict()]
+    def __init__(self) -> None:
+        super().__init__()
+        self._boards: list[dict] = [_default_board_dict()]
         self._cur = 0
-        self._suppress = False
-        self._scalar_widgets: dict[str, QWidget] = {}
-        self._array_state: dict[str, list[int]] = {}
-        self._array_bcast: dict[str, QSpinBox] = {}
+        self._paths: list[str] = []
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(16, 12, 16, 12)
-        root.setSpacing(12)
+    def count(self) -> int:
+        return len(self._boards)
 
-        # --- board selector row ---
-        sel_row = QHBoxLayout()
-        sel_row.addWidget(QLabel("Editing board:"))
-        self._board_sel = QSpinBox()
-        self._board_sel.setRange(0, 0)
-        self._board_sel.valueChanged.connect(self._on_board_change)
-        sel_row.addWidget(self._board_sel)
-        self._path_lbl = QLabel("")
-        self._path_lbl.setObjectName("FieldValue")
-        sel_row.addWidget(self._path_lbl)
-        sel_row.addStretch(1)
-        root.addLayout(sel_row)
+    def current(self) -> int:
+        return self._cur
 
-        # --- scalar card ---
-        scalar_card = QFrame()
-        scalar_card.setObjectName("Card")
-        sc_v = QVBoxLayout(scalar_card)
-        sc_v.setContentsMargins(18, 12, 18, 12)
-        title = QLabel("Board Parameters")
-        title.setObjectName("CardTitle")
-        sc_v.addWidget(title)
-        form = QFormLayout()
-        form.setHorizontalSpacing(18)
-        form.setVerticalSpacing(9)
-        for spec in _BOARD_SCALARS:
-            w = _make_widget(spec)
-            if spec.tip:
-                w.setToolTip(spec.tip)
-            self._scalar_widgets[spec.key] = w
-            _wire_change(w, spec.kind, self._emit_changed)
-            form.addRow(spec.label + ":", w)
-        sc_v.addLayout(form)
-        root.addWidget(scalar_card)
+    def paths(self) -> list[str]:
+        return self._paths
 
-        # --- channel arrays card ---
-        arr_card = QFrame()
-        arr_card.setObjectName("Card")
-        ac_v = QVBoxLayout(arr_card)
-        ac_v.setContentsMargins(18, 12, 18, 12)
-        atitle = QLabel("Per-Channel Parameters")
-        atitle.setObjectName("CardTitle")
-        ac_v.addWidget(atitle)
-        agrid = QGridLayout()
-        agrid.setHorizontalSpacing(12)
-        agrid.setVerticalSpacing(9)
-        agrid.addWidget(self._hdr("Parameter"), 0, 0)
-        agrid.addWidget(self._hdr("Broadcast value"), 0, 1)
-        agrid.addWidget(self._hdr(""), 0, 2)
-        for r, (key, label, lo, hi) in enumerate(_CHANNEL_ARRAYS, start=1):
-            lbl = QLabel(label + ":")
-            lbl.setObjectName("FieldLabel")
-            agrid.addWidget(lbl, r, 0)
-            bsp = QSpinBox()
-            bsp.setRange(lo, hi)
-            bsp.setToolTip(f"Set every channel to this value (range {lo}–{hi})")
-            self._array_bcast[key] = bsp
-            agrid.addWidget(bsp, r, 1)
-            btn_all = QPushButton("Set all")
-            btn_all.clicked.connect(lambda _=False, k=key: self._broadcast(k))
-            btn_edit = QPushButton("Per-channel…")
-            btn_edit.clicked.connect(lambda _=False, k=key, ll=label, a=lo, b=hi:
-                                     self._edit_channels(k, ll, a, b))
-            hb = QHBoxLayout()
-            hb.setContentsMargins(0, 0, 0, 0)
-            hb.addWidget(btn_all)
-            hb.addWidget(btn_edit)
-            cell = QWidget()
-            cell.setLayout(hb)
-            agrid.addWidget(cell, r, 2)
-        agrid.setColumnStretch(0, 1)
-        ac_v.addLayout(agrid)
-        root.addWidget(arr_card)
-        root.addStretch(1)
+    def dict(self, idx: int) -> dict:
+        return self._boards[idx]
 
-        self._load_board(0)
+    def dicts(self) -> list[dict]:
+        return [dict(d) for d in self._boards]
 
-    # -------- helpers --------
-    @staticmethod
-    def _hdr(t: str) -> QLabel:
-        lbl = QLabel(t)
-        lbl.setObjectName("FieldLabel")
-        return lbl
+    def set_current(self, idx: int) -> None:
+        if 0 <= idx < len(self._boards) and idx != self._cur:
+            self._cur = idx
+            self.board_changed.emit(idx)
 
-    @staticmethod
-    def _default_dict() -> dict:
-        d = BoardConfig().model_dump()
-        d.pop("Open", None)
-        return d
-
-    def _emit_changed(self, *_) -> None:
-        if not self._suppress:
-            self.changed.emit()
-
-    def _broadcast(self, key: str) -> None:
-        val = self._array_bcast[key].value()
-        self._array_state[key] = [val] * NUM_CHANNELS
-        self._emit_changed()
-
-    def _edit_channels(self, key: str, label: str, lo: int, hi: int) -> None:
-        dlg = ChannelArrayDialog(label, self._array_state[key], lo, hi, self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._array_state[key] = dlg.values()
-            self._emit_changed()
-
-    # -------- board switching --------
-    def _on_board_change(self, new_idx: int) -> None:
-        if new_idx == self._cur:
-            return
-        self._flush(self._cur)
-        self._load_board(new_idx)
-
-    def _flush(self, idx: int) -> None:
-        if not (0 <= idx < len(self._boards)):
-            return
-        d = self._boards[idx]
-        for spec in _BOARD_SCALARS:
-            d[spec.key] = _widget_value(self._scalar_widgets[spec.key], spec)
-        for key, *_ in _CHANNEL_ARRAYS:
-            d[key] = list(self._array_state[key])
-
-    def _load_board(self, idx: int) -> None:
-        if not (0 <= idx < len(self._boards)):
-            return
-        self._cur = idx
-        d = self._boards[idx]
-        self._suppress = True
-        try:
-            for spec in _BOARD_SCALARS:
-                _set_widget(self._scalar_widgets[spec.key], spec, d[spec.key])
-            for key, _label, lo, _hi in _CHANNEL_ARRAYS:
-                vals = list(d.get(key, [lo] * NUM_CHANNELS))
-                self._array_state[key] = vals
-                # broadcast box shows the common value, or the first if mixed
-                self._array_bcast[key].setValue(vals[0] if vals else lo)
-        finally:
-            self._suppress = False
-
-    # -------- public API --------
     def set_count(self, n: int, paths: list[str] | None = None) -> None:
-        """Match the number of boards to *n* (preserving existing dicts)."""
         n = max(1, n)
-        self._flush(self._cur)
         while len(self._boards) < n:
-            self._boards.append(self._default_dict())
+            self._boards.append(_default_board_dict())
         while len(self._boards) > n:
             self._boards.pop()
-        self._paths = list(paths or [])
-        self._board_sel.setRange(0, n - 1)
+        if paths is not None:
+            self._paths = list(paths)
         if self._cur >= n:
             self._cur = n - 1
-            self._board_sel.setValue(self._cur)
-        self._update_path_label()
-        self._load_board(self._cur)
+        self.count_changed.emit(n)
+        self.board_changed.emit(self._cur)
 
-    def _update_path_label(self) -> None:
-        paths = getattr(self, "_paths", [])
-        if self._cur < len(paths):
-            self._path_lbl.setText(f"  ({paths[self._cur]})")
-        else:
-            self._path_lbl.setText("")
-
-    def load_boards(self, boards: list[BoardConfig]) -> None:
-        """Load full per-board parameter dicts from a config."""
+    def load(self, boards: list[BoardConfig]) -> None:
         self._boards = []
         for b in boards:
             d = b.model_dump()
             d.pop("Open", None)
             self._boards.append(d)
         if not self._boards:
-            self._boards = [self._default_dict()]
+            self._boards = [_default_board_dict()]
         self._cur = 0
-        self._board_sel.setRange(0, len(self._boards) - 1)
-        self._board_sel.setValue(0)
         self._paths = [b.Open for b in boards]
-        self._update_path_label()
-        self._load_board(0)
+        self.count_changed.emit(len(self._boards))
+        self.board_changed.emit(0)
 
-    def board_dicts(self) -> list[dict]:
-        """Return current per-board parameter dicts (no ``Open``)."""
-        self._flush(self._cur)
-        return [dict(d) for d in self._boards]
+
+class BoardScopeForm(QWidget):
+    """Per-board / per-channel editor for ONE section, bound to a shared
+    :class:`BoardParams`. Renders a board selector, the section's board-scalar
+    fields, and its per-channel arrays (broadcast value + an 8×8 dialog).
+    Writes edits straight through to the shared model and emits :attr:`changed`.
+    """
+
+    changed = Signal()
+
+    def __init__(self, params: BoardParams,
+                 scalars: list[FieldSpec],
+                 arrays: list[tuple[str, str, int, int]],
+                 parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._p = params
+        self._scalars = scalars
+        self._arrays = arrays
+        self._suppress = False
+        self._scalar_widgets: dict[str, QWidget] = {}
+        self._array_bcast: dict[str, QSpinBox] = {}
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 12, 0, 0)
+        root.setSpacing(12)
+
+        # board selector
+        sel = QHBoxLayout()
+        sel.addWidget(QLabel("Board:"))
+        self._sel = QSpinBox()
+        self._sel.setRange(0, max(0, params.count() - 1))
+        self._sel.valueChanged.connect(self._on_sel)
+        sel.addWidget(self._sel)
+        self._path = QLabel("")
+        self._path.setObjectName("FieldValue")
+        sel.addWidget(self._path)
+        sel.addStretch(1)
+        root.addLayout(sel)
+
+        # per-board scalar card
+        if scalars:
+            card = QFrame()
+            card.setObjectName("Card")
+            cv = QVBoxLayout(card)
+            cv.setContentsMargins(18, 12, 18, 12)
+            cv.setSpacing(8)
+            t = QLabel("Per-Board Parameters")
+            t.setObjectName("CardTitle")
+            cv.addWidget(t)
+            form = QFormLayout()
+            form.setHorizontalSpacing(18)
+            form.setVerticalSpacing(9)
+            for spec in scalars:
+                w = _make_widget(spec)
+                if spec.tip:
+                    w.setToolTip(spec.tip)
+                self._scalar_widgets[spec.key] = w
+                _wire_change(w, spec.kind,
+                             lambda *_, k=spec.key, s=spec: self._scalar_edited(k, s))
+                form.addRow(spec.label + ":", w)
+            cv.addLayout(form)
+            root.addWidget(card)
+
+        # per-channel arrays card
+        if arrays:
+            card = QFrame()
+            card.setObjectName("Card")
+            cv = QVBoxLayout(card)
+            cv.setContentsMargins(18, 12, 18, 12)
+            cv.setSpacing(8)
+            t = QLabel("Per-Channel Parameters")
+            t.setObjectName("CardTitle")
+            cv.addWidget(t)
+            grid = QGridLayout()
+            grid.setHorizontalSpacing(12)
+            grid.setVerticalSpacing(9)
+            grid.addWidget(self._hdr("Parameter"), 0, 0)
+            grid.addWidget(self._hdr("Broadcast value"), 0, 1)
+            grid.addWidget(self._hdr(""), 0, 2)
+            for r, (key, label, lo, hi) in enumerate(arrays, start=1):
+                lbl = QLabel(label + ":")
+                lbl.setObjectName("FieldLabel")
+                grid.addWidget(lbl, r, 0)
+                bsp = QSpinBox()
+                bsp.setRange(lo, hi)
+                bsp.setToolTip(f"Set every channel to this value (range {lo}–{hi})")
+                self._array_bcast[key] = bsp
+                grid.addWidget(bsp, r, 1)
+                btn_all = QPushButton("Set all")
+                btn_all.clicked.connect(lambda _=False, k=key: self._broadcast(k))
+                btn_edit = QPushButton("Per-channel…")
+                btn_edit.clicked.connect(lambda _=False, k=key, ll=label, a=lo, b=hi:
+                                         self._edit(k, ll, a, b))
+                hb = QHBoxLayout()
+                hb.setContentsMargins(0, 0, 0, 0)
+                hb.addWidget(btn_all)
+                hb.addWidget(btn_edit)
+                cell = QWidget()
+                cell.setLayout(hb)
+                grid.addWidget(cell, r, 2)
+            grid.setColumnStretch(0, 1)
+            cv.addLayout(grid)
+            root.addWidget(card)
+
+        params.board_changed.connect(self._reload)
+        params.count_changed.connect(self._on_count)
+        self._on_count(params.count())
+        self._reload(params.current())
+
+    @staticmethod
+    def _hdr(t: str) -> QLabel:
+        lbl = QLabel(t)
+        lbl.setObjectName("FieldLabel")
+        return lbl
+
+    def _on_sel(self, v: int) -> None:
+        if not self._suppress:
+            self._p.set_current(v)
+
+    def _on_count(self, n: int) -> None:
+        self._suppress = True
+        self._sel.setRange(0, max(0, n - 1))
+        self._suppress = False
+        self._update_path()
+
+    def _reload(self, idx: int) -> None:
+        self._suppress = True
+        try:
+            self._sel.setValue(idx)
+            d = self._p.dict(idx)
+            for spec in self._scalars:
+                _set_widget(self._scalar_widgets[spec.key], spec, d[spec.key])
+            for key, _label, lo, _hi in self._arrays:
+                vals = d.get(key, [lo] * NUM_CHANNELS)
+                self._array_bcast[key].setValue(vals[0] if vals else lo)
+        finally:
+            self._suppress = False
+        self._update_path()
+
+    def _update_path(self) -> None:
+        paths = self._p.paths()
+        i = self._p.current()
+        self._path.setText(f"  ({paths[i]})" if i < len(paths) else "")
+
+    def _scalar_edited(self, key: str, spec: FieldSpec) -> None:
+        if self._suppress:
+            return
+        self._p.dict(self._p.current())[key] = _widget_value(
+            self._scalar_widgets[key], spec
+        )
+        self.changed.emit()
+
+    def _broadcast(self, key: str) -> None:
+        val = self._array_bcast[key].value()
+        self._p.dict(self._p.current())[key] = [val] * NUM_CHANNELS
+        self.changed.emit()
+
+    def _edit(self, key: str, label: str, lo: int, hi: int) -> None:
+        cur = self._p.dict(self._p.current()).get(key, [lo] * NUM_CHANNELS)
+        dlg = ChannelArrayDialog(label, cur, lo, hi, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            vals = dlg.values()
+            self._p.dict(self._p.current())[key] = vals
+            self._array_bcast[key].setValue(vals[0] if vals else lo)
+            self.changed.emit()

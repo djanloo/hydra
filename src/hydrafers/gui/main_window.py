@@ -51,9 +51,12 @@ from PySide6.QtWidgets import (
 from hydrafers.config import HydraConfig, default_config, load_config, save_config
 from hydrafers.config.schema import BoardConfig
 from hydrafers.gui.config_form import (
+    BOARD_SCALARS,
+    CHANNEL_ARRAYS,
     SECTION_SPECS,
     SECTION_TITLES,
-    BoardSettingsForm,
+    BoardParams,
+    BoardScopeForm,
     SectionForm,
 )
 from hydrafers.gui.icons import NEUTRAL, ON_COLOR, icon
@@ -493,21 +496,18 @@ class MainWindow(QMainWindow):
 
         tabs = QTabWidget()
         self._section_forms: dict[str, SectionForm] = {}
+        self._board_scope_forms: list[BoardScopeForm] = []
+        # Shared per-board model: every section's board/channel editor binds to it,
+        # so switching board on one tab switches it everywhere.
+        self._board_params = BoardParams()
 
-        # Global section tabs in a deliberate order.
+        # One tab per functional section. Each tab stacks the section's global
+        # params and (where they exist) its own per-board / per-channel params —
+        # matching the legacy Janus tabs, so e.g. the Discriminator tab holds the
+        # T/Q thresholds and masks, not a separate catch-all tab.
         for name in ("acq_mode", "discr", "spectroscopy", "hv_bias",
                      "run_ctrl", "output_files", "test_probe"):
-            form = SectionForm(SECTION_SPECS[name])
-            self._section_forms[name] = form
-            tabs.addTab(form, SECTION_TITLES[name])
-
-        # Per-board / per-channel tab.
-        self._board_form = BoardSettingsForm()
-        board_scroll = QScrollArea()
-        board_scroll.setWidgetResizable(True)
-        board_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        board_scroll.setWidget(self._board_form)
-        tabs.addTab(board_scroll, "Board / Channel")
+            tabs.addTab(self._build_section_tab(name), SECTION_TITLES[name])
 
         vbox.addWidget(tabs, 1)
 
@@ -540,9 +540,37 @@ class MainWindow(QMainWindow):
         # Any edit in a section/board form marks the config dirty (button → orange).
         for form in self._section_forms.values():
             form.changed.connect(self._mark_dirty)
-        self._board_form.changed.connect(self._mark_dirty)
+        for bsf in self._board_scope_forms:
+            bsf.changed.connect(self._mark_dirty)
 
         return page
+
+    def _build_section_tab(self, name: str) -> QWidget:
+        """Build one settings tab: the section's global params plus, if any, its
+        per-board / per-channel params, in a single scrollable column."""
+        container = QWidget()
+        col = QVBoxLayout(container)
+        col.setContentsMargins(16, 14, 16, 14)
+        col.setSpacing(12)
+
+        form = SectionForm(SECTION_SPECS[name])
+        self._section_forms[name] = form
+        col.addWidget(form)
+
+        scalars = BOARD_SCALARS.get(name)
+        arrays = CHANNEL_ARRAYS.get(name)
+        if scalars or arrays:
+            bsf = BoardScopeForm(self._board_params, scalars or [], arrays or [])
+            self._board_scope_forms.append(bsf)
+            col.addWidget(bsf)
+
+        col.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(container)
+        return scroll
 
     def _build_overview_page(self) -> QWidget:
         scroll = QScrollArea()
@@ -951,7 +979,7 @@ class MainWindow(QMainWindow):
         expected to surface it to the user.
         """
         paths = self._connect_paths()
-        board_dicts = self._board_form.board_dicts()
+        board_dicts = self._board_params.dicts()
         boards: list[BoardConfig] = []
         for i, path in enumerate(paths):
             d = dict(board_dicts[i]) if i < len(board_dicts) else {}
@@ -970,15 +998,15 @@ class MainWindow(QMainWindow):
         """Fill every editing widget from *cfg* (forms now match config: clean)."""
         for name, form in self._section_forms.items():
             form.load(getattr(cfg, name))
-        self._board_form.load_boards(cfg.boards)
+        self._board_params.load(cfg.boards)
         self._mark_clean()
 
     def _sync_board_count(self) -> None:
-        """Keep the Board/Channel selector in step with the Connect page rows."""
-        if not hasattr(self, "_board_form"):
+        """Keep the per-board editors in step with the Connect page rows."""
+        if not hasattr(self, "_board_params"):
             return
         paths = self._connect_paths()
-        self._board_form.set_count(len(paths), paths)
+        self._board_params.set_count(len(paths), paths)
 
     def _set_dirty(self, dirty: bool) -> None:
         """Toggle the 'pending changes' visual state of the Apply button."""
