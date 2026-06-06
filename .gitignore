@@ -25,8 +25,10 @@ out/
 # CMake generated files
 _deps/
 *.cmake
-!cmake/mingw-toolchain.cmake               # keep the vendored toolchain
-!packaging/mingw-w64-toolchain.cmake       # keep the cross-build toolchain
+# Re-include the vendored / cross-build toolchains despite *.cmake above.
+# (Inline '#' comments are NOT allowed on pattern lines, so keep them separate.)
+!cmake/mingw-toolchain.cmake
+!packaging/mingw-w64-toolchain.cmake
 
 # Python packaging / build artefacts
 dist/
