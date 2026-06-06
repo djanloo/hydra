@@ -712,12 +712,33 @@ class BoardConfig(_Base):
     )
     @classmethod
     def _v_ch_list(cls, v: Any, info: Any) -> list[int]:
-        """Accept a scalar (broadcast to 64), or a list (must be exactly 64)."""
+        """Normalize a per-channel field to a 64-element list.
+
+        Accepted input forms (the model is always stored as a length-64 list):
+          * a scalar int            -> broadcast to all 64 channels;
+          * a ``{default, overrides}`` mapping -> ``default`` everywhere, with
+            ``overrides`` a ``{channel: value}`` map for the few that differ;
+          * an explicit 64-element list.
+        The first two are the compact on-disk forms emitted by ``save_config``.
+        """
         name = info.field_name
         if isinstance(v, bool):
             raise ValueError(f"{name}: boolean is not a valid channel value")
         if isinstance(v, int):
             values = [v] * NUM_CHANNELS
+        elif isinstance(v, dict):
+            default = int(v.get("default", 0))
+            values = [default] * NUM_CHANNELS
+            overrides = v.get("overrides") or {}
+            if not isinstance(overrides, dict):
+                raise ValueError(f"{name}: 'overrides' must be a {{channel: value}} map")
+            for k, val in overrides.items():
+                ch = int(k)
+                if not (0 <= ch < NUM_CHANNELS):
+                    raise ValueError(
+                        f"{name}: override channel {ch} out of range [0, {NUM_CHANNELS - 1}]"
+                    )
+                values[ch] = int(val)
         elif isinstance(v, (list, tuple)):
             if len(v) != NUM_CHANNELS:
                 raise ValueError(
@@ -727,7 +748,8 @@ class BoardConfig(_Base):
             values = [int(x) for x in v]
         else:
             raise ValueError(
-                f"{name}: expected an int (broadcast) or a {NUM_CHANNELS}-element list"
+                f"{name}: expected an int (broadcast), a {{default, overrides}} map, "
+                f"or a {NUM_CHANNELS}-element list"
             )
         lo, hi = cls._CH_RANGES.get(name, (None, None))
         if lo is not None:
