@@ -172,6 +172,12 @@ message = "chore(release): v{new_version}"
 tag = true
 tag_name = "v{new_version}"
 tag_message = "Release v{new_version}"
+# Before committing, regenerate CHANGELOG.md with git-cliff for the new tag and
+# stage it, so the changelog is always in sync with the version on every tag.
+# (hooks run with shell=False, so wrap in `bash -c` to expand the env var.)
+pre_commit_hooks = [
+    "bash -c 'git-cliff --tag $BVHOOK_NEW_VERSION_TAG --output CHANGELOG.md && git add CHANGELOG.md'",
+]
 
 [[tool.bumpversion.files]]
 filename = "pyproject.toml"
