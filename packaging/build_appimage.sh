@@ -20,6 +20,12 @@ cd "$ROOT"
 echo "==> Repo:    $ROOT"
 echo "==> Python:  $PYTHON"
 
+# PyInstaller imports pyqtgraph/PySide6 in isolated subprocesses to enumerate
+# submodules; on a headless box that triggers the Qt "xcb" platform plugin,
+# which aborts when libxcb-cursor0 is absent (e.g. CI runners). Force the
+# always-available offscreen platform so collection never needs a display.
+export QT_QPA_PLATFORM=offscreen
+
 # --- 1. PyInstaller -------------------------------------------------------
 echo "==> Running PyInstaller…"
 rm -rf "$ROOT/dist/hydrafers" "$ROOT/build/pyi"
