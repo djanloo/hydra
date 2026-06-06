@@ -157,3 +157,44 @@ timeout   = 30
 # src-layout package root and the compiled-extension build dir to sys.path.
 # (pytest resolves these relative to this file's directory / the rootdir.)
 pythonpath = ["src", "build-debug"]
+
+# ---------------------------------------------------------------------------
+# bump-my-version — single source of truth for the version across the project.
+#   bump-my-version bump patch     0.0.1 -> 0.0.2  (also commits + tags vX.Y.Z)
+#   bump-my-version bump minor|major
+# ferslib (native/ferslib) is vendored and intentionally NOT touched here.
+# ---------------------------------------------------------------------------
+[tool.bumpversion]
+current_version = "1.0.0"
+allow_dirty = true
+commit = true
+message = "chore(release): v{new_version}"
+tag = true
+tag_name = "v{new_version}"
+tag_message = "Release v{new_version}"
+
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"
+regex = true
+search = 'version\s*=\s*"{current_version}"'
+replace = 'version     = "{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "src/hydrafers/__init__.py"
+search = '__version__: str = "{current_version}"'
+replace = '__version__: str = "{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "src/pyfers/__init__.py"
+search = '__version__ = "{current_version}"'
+replace = '__version__ = "{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "CMakeLists.txt"
+search = "project(hydrafers VERSION {current_version} LANGUAGES C CXX)"
+replace = "project(hydrafers VERSION {new_version} LANGUAGES C CXX)"
+
+[[tool.bumpversion.files]]
+filename = "packaging/hydrafers.iss"
+search = '#define MyAppVersion "{current_version}"'
+replace = '#define MyAppVersion "{new_version}"'
