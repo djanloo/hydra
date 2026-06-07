@@ -1,8 +1,21 @@
+## [0.0.5] - 2026-06-07
+
+### 🐛 Bug Fixes
+
+- *(gui)* Trigger rate set as a per-board statistic
+
+### 🎨 Styling
+
+- Moved the Connection tab into the Settings tab
 ## [0.0.4] - 2026-06-06
 
 ### 🎨 Styling
 
 - Made the logo bigger
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* V0.0.4
 ## [0.0.3] - 2026-06-06
 
 ### 🐛 Bug Fixes

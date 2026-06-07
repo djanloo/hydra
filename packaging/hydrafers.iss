@@ -5,7 +5,7 @@
 ; Output: dist\HydraFERS-Setup-<version>.exe
 
 #define MyAppName "HydraFERS"
-#define MyAppVersion "0.0.4"
+#define MyAppVersion "0.0.5"
 #define MyAppPublisher "CAEN"
 #define MyAppExeName "hydrafers.exe"
 

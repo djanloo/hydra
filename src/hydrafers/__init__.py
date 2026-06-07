@@ -27,7 +27,7 @@ handler before importing this package to capture startup messages.
 
 from __future__ import annotations
 
-__version__: str = "0.0.4"
+__version__: str = "0.0.5"
 __author__: str = "CAEN SpA — Front-End Division"
 
 # Re-export the configuration root model (pure Python; always importable,
