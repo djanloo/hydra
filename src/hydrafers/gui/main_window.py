@@ -681,11 +681,12 @@ class MainWindow(QMainWindow):
         self._stats_card.add_row("run_number",   "Run #",        "—")
         self._stats_card.add_row("elapsed",       "Elapsed",      "—")
         self._stats_card.add_row("total_events",  "Total events", "—")
-        self._stats_card.add_row("built_events",  "Built events", "—")
-        self._stats_card.add_row("event_rate",    "Event rate",   "—")
-        self._stats_card.add_row("trg_rate",      "Trigger rate", "—")
-        self._stats_card.add_row("data_volume",   "Data volume",  "—")
-        self._stats_card.add_row("data_rate",     "Data rate",    "—")
+        self._stats_card.add_row("built_events",  "Built events",  "—")
+        # The (bunch) trigger is common to the whole board, so the trigger rate
+        # is a single value — not a per-channel quantity.
+        self._stats_card.add_row("event_rate",    "Trigger rate",  "—")
+        self._stats_card.add_row("data_volume",   "Data volume",   "—")
+        self._stats_card.add_row("data_rate",     "Data rate",     "—")
         vbox.addWidget(self._stats_card)
 
         # --- per-board throughput cards (filled on connect) ---
@@ -705,7 +706,9 @@ class MainWindow(QMainWindow):
         ctrl.addWidget(self._stats_board_spin)
         ctrl.addWidget(QLabel("Metric:"))
         self._stats_metric = QComboBox()
-        self._stats_metric.addItems(["Trigger Rate (Hz)", "Trigger Count"])
+        # Per-channel quantity is HITS (the trigger is common to the whole board,
+        # so it is NOT per-channel — the single trigger rate is in the run summary).
+        self._stats_metric.addItems(["Hit Count", "Hit Rate (Hz)"])
         ctrl.addWidget(self._stats_metric)
         ctrl.addStretch(1)
         vbox.addLayout(ctrl)
@@ -717,7 +720,7 @@ class MainWindow(QMainWindow):
         grid_outer.setContentsMargins(14, 10, 14, 10)
         grid_outer.setSpacing(6)
 
-        grid_title = QLabel("Per-Channel Trigger Rate / Count")
+        grid_title = QLabel("Per-Channel Hits")
         grid_title.setObjectName("CardTitle")
         grid_outer.addWidget(grid_title)
 
@@ -772,8 +775,10 @@ class MainWindow(QMainWindow):
         sum_vbox.addWidget(sum_title)
 
         self._all_brd_table = QTableWidget(0, 7)
+        # "Trigger Rate" = the board's common (bunch) trigger/event rate;
+        # "Hit Rate" = the aggregate of the per-channel hit rates on that board.
         self._all_brd_table.setHorizontalHeaderLabels(
-            ["Board", "Events", "Event Rate", "Trg Rate", "Data Rate", "Lost Events", "Bytes"]
+            ["Board", "Events", "Trigger Rate", "Hit Rate", "Data Rate", "Lost Events", "Bytes"]
         )
         self._all_brd_table.horizontalHeader().setStretchLastSection(True)
         self._all_brd_table.verticalHeader().setVisible(False)
@@ -1316,7 +1321,8 @@ class MainWindow(QMainWindow):
 
     def _update_ch_grid(self, stats: RunStatistics) -> None:
         brd = self._stats_board_spin.value()
-        use_rate = self._stats_metric.currentIndex() == 0
+        # 0 = Hit Count (ch_count), 1 = Hit Rate (ch_trg_rate = per-channel hits/s)
+        use_rate = self._stats_metric.currentIndex() == 1
 
         if use_rate:
             if stats.ch_trg_rate.shape[0] <= brd:
@@ -1634,9 +1640,9 @@ class MainWindow(QMainWindow):
         self._stats_card.set_value("elapsed",       f"{s.elapsed_s:,.1f} s")
         self._stats_card.set_value("total_events",  f"{s.total_events:,}")
         self._stats_card.set_value("built_events",  f"{s.built_events:,}")
+        # "event_rate" row is labelled "Trigger rate": the common (bunch) trigger
+        # rate of the board — a single value, not a per-channel quantity.
         self._stats_card.set_value("event_rate",    _human_rate(s.event_rate_hz))
-        total_trg = float(s.ch_trg_rate.sum()) if s.ch_trg_rate.size else 0.0
-        self._stats_card.set_value("trg_rate", _human_rate(total_trg) if total_trg else "—")
         self._stats_card.set_value("data_volume",   _human_bytes(s.byte_count))
         self._stats_card.set_value("data_rate",     f"{s.data_rate_mbps:.2f} MB/s")
 
