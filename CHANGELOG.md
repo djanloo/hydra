@@ -1,3 +1,8 @@
+## [0.0.6] - 2026-06-07
+
+### 🎨 Styling
+
+- Adjusted CAEN logo
 ## [0.0.5] - 2026-06-07
 
 ### 🐛 Bug Fixes
@@ -7,6 +12,10 @@
 ### 🎨 Styling
 
 - Moved the Connection tab into the Settings tab
+
+### ⚙️ Miscellaneous Tasks
+
+- *(release)* V0.0.5
 ## [0.0.4] - 2026-06-06
 
 ### 🎨 Styling
