@@ -54,12 +54,30 @@ Branch: `feat/5203-integration`.
 - **gui Connect page** (`5b5402c`): removed the per-board enable checkbox — a row
   with a non-empty path is a board.
 
+### Build — DONE on this machine (MSVC)
+`pyferslib` compiles and installs with **MSVC (VS 2022 Community)**; the full
+test suite (90) passes against the **real** compiled binding, not the stub.
+
+Recipe (Windows, from `hydra/`, MinGW is discouraged — force `cl`):
+```
+call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+set CC=cl & set CXX=cl
+..\hydravenv\Scripts\python.exe -m pip wheel . --no-deps -w dist -v   # build the wheel
+..\hydravenv\Scripts\python.exe -m pip install --force-reinstall --no-deps dist\hydrafers-*.whl
+```
+Notes: forcing `CC/CXX=cl` keeps CMake from picking the Strawberry-Perl gcc on
+PATH. Produces `hydrafers-0.0.6-cp314-cp314-win_amd64.whl`; installs the
+`pyferslib.cp314-win_amd64.pyd` module + `pyfers`/`hydrafers` packages and the
+`hydrafers` / `hydrafers-gui` / `hydrafers-cli` / `hydrafers-tui` entry points.
+The dev `build-debug/pyferslib.py` stub is only needed on a machine WITHOUT a
+built binding (it's gitignored); delete it once the real `.pyd` is installed so
+pytest uses the real module.
+
 ### Status — TODO
-- **Build + hardware**: compile `pyferslib` with **MSVC** (MinGW is discouraged —
-  breaks the build), then validate on real 5202/5203. The 5202 comm is broken;
+- **Hardware validation**: run on real 5202/5203. The 5202 comm is broken;
   debug when hardware is attached.
 - Optional/nice-to-have: CLI/TUI (`textual`/`rich`) 5203 awareness; `extras` not
-  installed. Live GUI run against real data once a binding is built.
+  installed. Live GUI run against real data once hardware is connected.
 
 ### Dev environment (this machine)
 - Python **3.14** in `../hydravenv` (was empty; now has pydantic, numpy, pyyaml,
