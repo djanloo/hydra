@@ -39,6 +39,10 @@ class FakeFers:
         self.path_of: dict[int, str] = {}       # handle -> path
         self.fail_paths: set[str] = set()       # paths that raise on open
         self.no_info_paths: set[str] = set()    # paths whose get_board_info raises
+        # Per-path board identity for get_board_info. Defaults to an A5202 with
+        # 64 channels; set ``family_of[path] = 5203`` (or a full dict) to make a
+        # given path open as a different board family.
+        self.family_of: dict[str, int] = {}     # path -> FERSCode (5202/5203)
         self.closed: list[int] = []             # handles closed, in order
         self.configured: list[tuple[int, int]] = []   # (handle, cfg_mode_int)
         self.readout_init: list[tuple[int, int]] = []  # (handle, romode)
@@ -68,10 +72,13 @@ class FakeFers:
         self.devices.pop(handle, None)
 
     def get_board_info(self, handle):
-        if self.path_of.get(handle) in self.no_info_paths:
+        path = self.path_of.get(handle)
+        if path in self.no_info_paths:
             raise pyferslib.FERSError(-1, "no board info (concentrator)")
-        return SimpleNamespace(pid=1234, model_name="A5202",
-                               fpga_fwrev=0x010203, num_ch=64)
+        code = int(self.family_of.get(path, 5202))
+        num_ch = 128 if code == 5203 else 64
+        return SimpleNamespace(pid=1234, model_name=f"A{code}",
+                               fers_code=code, fpga_fwrev=0x010203, num_ch=num_ch)
 
     # ---------------------------------------------------------- config / regs
     def configure(self, handle, mode_int):

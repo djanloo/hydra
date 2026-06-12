@@ -23,7 +23,7 @@ import pyferslib
 
 from . import events as _events
 from .board import Board
-from .enums import SortMode, StartMode
+from .enums import BoardFamily, SortMode, StartMode
 from .errors import ConfigError
 
 # Valid configure-mode strings accepted by :meth:`System.configure`.
@@ -60,6 +60,9 @@ class System:
             for board in boards:
                 board.open()
                 opened.append(board)
+            # Enforce a homogeneous fleet: ferslib forbids mixing 5202 and 5203
+            # in one running system (see docs/A5203_INTEGRATION_STUDY.md §3).
+            system._check_homogeneous(opened)
         except Exception:
             for board in opened:
                 try:
@@ -123,6 +126,42 @@ class System:
         ``stop_acquisition``. Closed boards are skipped.
         """
         return [b.handle for b in self._boards if b.is_open]
+
+    @property
+    def family(self) -> "BoardFamily | None":
+        """The board family of this (homogeneous) system, or ``None`` if unknown.
+
+        Returns the family shared by all boards that report one. Raises
+        :class:`ConfigError` if open boards report conflicting families (which
+        :meth:`open` already prevents, but a re-check here keeps callers honest).
+        """
+        return self._check_homogeneous(
+            [b for b in self._boards if b.is_open]
+        )
+
+    @staticmethod
+    def _check_homogeneous(boards: list[Board]) -> "BoardFamily | None":
+        """Return the single family shared by *boards*, or raise on a mix.
+
+        Boards that cannot report a family (e.g. concentrator endpoints) are
+        ignored. ``None`` is returned only when no board reports a family.
+        """
+        families: dict[BoardFamily, list[str]] = {}
+        for board in boards:
+            fam = board.family
+            if fam is None:
+                continue
+            families.setdefault(fam, []).append(board.path)
+        if len(families) > 1:
+            detail = "; ".join(
+                f"{fam.name} ({fam.value}): {paths}" for fam, paths in families.items()
+            )
+            raise ConfigError(
+                "mixed FERS board families in one system are not supported "
+                f"(ferslib forbids it): {detail}. Open one homogeneous system "
+                "per family instead."
+            )
+        return next(iter(families), None)
 
     # ------------------------------------------------------------------ config
     def configure(

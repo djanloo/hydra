@@ -38,7 +38,17 @@ import pyferslib
 
 from . import events
 from .board import HV, Board
-from .enums import AcqMode, GainSelect, SortMode, StartMode, StopMode
+from .enums import (
+    AcqMode,
+    AcqMode5203,
+    BoardFamily,
+    GainSelect,
+    MeasMode,
+    SortMode,
+    StartMode,
+    StopMode,
+    acq_mode_enum_for_family,
+)
 from .errors import ConfigError, FERSError
 from .events import (
     CountingEvent,
@@ -92,7 +102,11 @@ __all__ = [
     "Board",
     "HV",
     # enums
+    "BoardFamily",
     "AcqMode",
+    "AcqMode5203",
+    "MeasMode",
+    "acq_mode_enum_for_family",
     "StartMode",
     "SortMode",
     "StopMode",

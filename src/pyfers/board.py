@@ -17,7 +17,7 @@ from typing import Any
 
 import pyferslib
 
-from .enums import SortMode
+from .enums import BoardFamily, SortMode
 from .errors import ConfigError
 
 # Configuration-mode string -> pyferslib constant (CFG_HARD / CFG_SOFT).
@@ -156,6 +156,46 @@ class Board:
         if self._info is None:
             raise ConfigError(f"board {self.path!r} is not open; no info available")
         return self._info
+
+    @property
+    def fers_code(self) -> int:
+        """The ferslib ``FERSCode`` (e.g. 5202/5203), or 0 if unknown.
+
+        Read from the cached board info; concentrator-only endpoints (no info)
+        and not-yet-opened boards report 0.
+        """
+        if self._info is None:
+            return 0
+        return int(getattr(self._info, "fers_code", getattr(self._info, "FERSCode", 0)))
+
+    @property
+    def family(self) -> "BoardFamily | None":
+        """The :class:`~pyfers.enums.BoardFamily`, or ``None`` if undetermined.
+
+        Resolved from :attr:`fers_code` when available, else inferred from the
+        board model name (``"A5202"``/``"A5203"``). ``None`` for a board that is
+        not open or is a concentrator-only endpoint with no recognizable info.
+        """
+        code = self.fers_code
+        if code:
+            try:
+                return BoardFamily.from_code(code)
+            except ValueError:
+                pass
+        if self._info is not None:
+            return BoardFamily.from_model_name(getattr(self._info, "model_name", ""))
+        return None
+
+    @property
+    def has_hv(self) -> bool:
+        """Whether this board has an HV bias generator (A5202 only).
+
+        The A5203 picoTDC has none (all ``FERS_HV_*`` calls return
+        NOT_APPLICABLE). When the family cannot be determined we conservatively
+        assume HV is present (the legacy/default 5202 behaviour).
+        """
+        fam = self.family
+        return fam.has_hv if fam is not None else True
 
     # ------------------------------------------------------------------ lifecycle
     def open(self) -> "Board":
