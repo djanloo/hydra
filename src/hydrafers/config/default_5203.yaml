@@ -1,0 +1,77 @@
+version: 1
+board_family: 5203
+boards:
+- Open: eth:192.168.50.3
+  ChEnableMask0: FFFFFFFF
+  ChEnableMask1: FFFFFFFF
+  ChEnableMask2: FFFFFFFF
+  ChEnableMask3: FFFFFFFF
+  GlitchFilterDelay: 3
+  DiscrThreshold: 10.0
+run_ctrl:
+  StartRunMode: ASYNC
+  StopRunMode: MANUAL
+  EventBuildingMode: DISABLED
+  TrgTimeWindow: 100 ns
+  PresetTime: '0'
+  PresetCounts: 0.0
+  JobFirstRun: 0
+  JobLastRun: 0
+  RunSleep: '0'
+  EnableJobs: 0
+  RunNumber_AutoIncr: 0
+output_files:
+  DataFilePath: DataFiles
+  OF_OutFileUnit: LSB
+  OF_EnMaxSize: 0
+  OF_MaxSize: 1 GB
+  OF_RawData: 0
+  OF_ListBin: 0
+  OF_ListAscii: 0
+  OF_ListCSV: 0
+  OF_Sync: 0
+  OF_ServiceInfo: 0
+  OF_RunInfo: 0
+  OF_LeadHisto: 0
+  OF_ToTHisto: 0
+acq_mode:
+  AcquisitionMode: COMMON_START
+  MeasMode: LEAD_ONLY
+  En_Head_Trail: ONE_WORD
+  En_Empty_Ev_Suppr: 0
+  TriggerSource: PTRG
+  TrefSource: PTRG
+  VetoSource: DISABLED
+  GateWidth: 2 us
+  TrgWindowWidth: 2 us
+  TrgWindowOffset: -1 us
+  PtrgPeriod: 10 us
+  DigitalProbe0: TRG_ACCEPTED
+  DigitalProbe1: TX_DATA_VALID
+  T0_Out: PTRG
+  T1_Out: ZERO
+tdc:
+  GlitchFilterMode: DISABLED
+  ToT_reject_low_thr: 0
+  ToT_reject_high_thr: 0
+  TDC_ChannelBufferSize: '128'
+  TriggerBufferSize: 16
+  TDCpulser_Width: 1 ns
+  TDCpulser_Period: 10 ns
+  HighResClock: DISABLED
+data_analysis:
+  DataAnalysis: ALL
+  LeadTrail_LSB: 0
+  LeadTrailHistoNbin: 4K
+  LeadTrailRebin: '1'
+  LeadHistoMin: 0 ns
+  ToT_LSB: 0
+  ToTHistoNbin: 1K
+  ToTRebin: '1'
+  ToTHistoMin: 0 ns
+  EnableWalkCorrection: 0
+  WalkFitCoeff: 1.23E-12 33.33 1e-2
+adapters:
+  AdapterType: NONE
+  DisableThresholdCalib: 0
+  A5256_Ch0Polarity: POSITIVE

@@ -27,7 +27,7 @@ Type handling (param_defs column 4):
 from __future__ import annotations
 
 import re
-from typing import Annotated, Any, ClassVar
+from typing import Annotated, Any, ClassVar, Literal
 
 from pydantic import (
     BaseModel,
@@ -39,6 +39,12 @@ from pydantic import (
 
 # Channel count for the 5202 board family (FERSLIB_MAX_NCH_5202 in FERSlib.h).
 NUM_CHANNELS: int = 64
+
+# Board family codes (ferslib FERSCode). HydraFERS never mixes families in one
+# running system (see docs/A5203_INTEGRATION_STUDY.md §3); a config file targets
+# exactly one family, declared by its ``board_family`` field.
+FAMILY_5202: int = 5202
+FAMILY_5203: int = 5203
 
 # A loose pattern for "value unit" strings such as "62.5 V", "100 ns", "1 GB".
 # We accept an optional leading sign, an int/float value, optional whitespace and
@@ -671,6 +677,8 @@ class BoardConfig(_Base):
     )
     # Names of unit ('u') board fields, kept verbatim.
     _UNIT_FIELDS: ClassVar[tuple[str, ...]] = ("HV_Vbias", "HV_Imax")
+    # Names of plain-int ('d') board fields (single value).
+    _INT_FIELDS: ClassVar[tuple[str, ...]] = ("TD_CoarseThreshold",)
     # Per-channel field range bounds (inclusive) -> (lo, hi).
     _CH_RANGES: ClassVar[dict[str, tuple[int, int]]] = {
         "HV_IndivAdj": (0, 255),
@@ -745,7 +753,8 @@ class BoardConfig(_Base):
                     f"{name}: per-channel list must have exactly {NUM_CHANNELS} "
                     f"entries, got {len(v)}"
                 )
-            values = [int(x) for x in v]
+            # accept str entries (e.g. from the legacy parser) with base-0 ints
+            values = [int(x, 0) if isinstance(x, str) else int(x) for x in v]
         else:
             raise ValueError(
                 f"{name}: expected an int (broadcast), a {{default, overrides}} map, "
@@ -761,15 +770,57 @@ class BoardConfig(_Base):
         return values
 
 
-class HydraConfig(_Base):
-    """Top-level HydraFERS configuration (CONTRACT.md §2).
+class BaseHydraConfig(_Base):
+    """Shared interface and plumbing for every board-family config (§0).
+
+    Both :class:`HydraConfig` (A5202) and ``HydraConfig5203`` (A5203) subclass
+    this so the engine / ``pyfers.System`` can treat any config uniformly through
+    :meth:`board_paths` / :meth:`to_ferslib_params` / :meth:`to_legacy_txt`.
+    The ``board_family`` discriminator (declared per subclass as a ``Literal``)
+    lets the loader pick the right model from the YAML.
+
+    Subclasses MUST define a ``board_family`` discriminator field, a ``boards``
+    list (each item exposing ``Open``) and implement :meth:`to_ferslib_params`.
+    """
+
+    version: int = 1
+
+    def board_paths(self) -> list[str]:
+        """Return the per-board connection strings, ordered by board index.
+
+        These are the verbatim ferslib ``Open`` values (e.g. ``"eth:192.168.50.3"``,
+        ``"usb:0"``, ``"tdl:0:0:0"``) and are consumed by
+        :meth:`pyfers.System.from_config` to open every board (CONTRACT.md §2).
+        """
+        return [board.Open for board in self.boards]
+
+    def to_ferslib_params(self) -> list[tuple[int, str, str]]:
+        """Flatten to ``(board_index, param_name, value_str)`` tuples.
+
+        Implemented per family (the section sets differ). See subclasses.
+        """
+        raise NotImplementedError
+
+    def to_legacy_txt(self) -> str:
+        """Serialize to the legacy ``Janus_Config.txt`` text format."""
+        # local import to avoid a circular dependency at module import time
+        from hydrafers.config.converter import render_legacy_txt
+
+        return render_legacy_txt(self)
+
+
+class HydraConfig(BaseHydraConfig):
+    """Top-level HydraFERS configuration for the **A5202** family (CONTRACT.md §2).
 
     Mirrors ``docs/param_defs_reference.txt``: global params grouped into the
     section sub-models, plus a list of per-board overrides (connection path,
     board-scoped and channel-scoped params).
+
+    Kept named ``HydraConfig`` (the default/primary family) for backward
+    compatibility; the sibling ``HydraConfig5203`` covers the picoTDC family.
     """
 
-    version: int = 1
+    board_family: Literal[5202] = FAMILY_5202
     boards: list[BoardConfig] = Field(default_factory=lambda: [BoardConfig()])
     hv_bias: HVBiasConfig = Field(default_factory=HVBiasConfig)
     run_ctrl: RunCtrlConfig = Field(default_factory=RunCtrlConfig)
@@ -788,15 +839,6 @@ class HydraConfig(_Base):
     # ------------------------------------------------------------------
     # Flatten / serialize
     # ------------------------------------------------------------------
-    def board_paths(self) -> list[str]:
-        """Return the per-board connection strings, ordered by board index.
-
-        These are the verbatim ferslib ``Open`` values (e.g. ``"eth:192.168.50.3"``,
-        ``"usb:0"``, ``"tdl:0:0:0"``) and are consumed by
-        :meth:`pyfers.System.from_config` to open every board (CONTRACT.md §2).
-        """
-        return [board.Open for board in self.boards]
-
     def to_ferslib_params(self) -> list[tuple[int, str, str]]:
         """Flatten to ``(board_index, param_name, value_str)`` tuples.
 
@@ -841,19 +883,6 @@ class HydraConfig(_Base):
                     params.append((b_idx, f"{name}[{ch}]", str(val)))
 
         return params
-
-    def to_legacy_txt(self) -> str:
-        """Serialize to the legacy ``Janus_Config.txt`` text format.
-
-        Mirrors ``docs/janus_config_example.txt``: a Connect block with indexed
-        ``Open[i]`` lines, then the common/default settings grouped by section,
-        then a board/channel overrides block. The output is feedable to
-        :func:`pyfers.load_config_file` as a fallback path.
-        """
-        # local import to avoid a circular dependency at module import time
-        from hydrafers.config.converter import render_legacy_txt
-
-        return render_legacy_txt(self)
 
 
 def _scalar_to_str(value: Any) -> str:
