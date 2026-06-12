@@ -37,7 +37,11 @@ MAGIC: bytes = b"HYDRFERS"
 MAGIC_SIZE: int = len(MAGIC)
 
 #: Current new-format version written by :class:`~hydrafers.io.EventWriter`.
-FORMAT_VERSION: int = 1
+#: v2 adds the self-describing ``board_family`` / ``num_ch`` / ``meas_mode``
+#: header fields so a reader can interpret a file without external context
+#: (A5202 energy vs A5203 picoTDC lead/trail). v1 files remain readable — the
+#: missing fields fall back to their A5202 defaults via ``FileHeader.from_dict``.
+FORMAT_VERSION: int = 2
 
 #: All multi-byte integers/floats in the new format are little-endian.
 ENDIAN: str = "<"
@@ -154,6 +158,15 @@ class FileHeader:
     time_unit: str = "LSB"
     sw_release: str = "HydraFERS"
     legacy: bool = False
+    #: Board family / FERSCode this file was recorded from (5202 or 5203). Lets a
+    #: reader pick the right interpretation (energy vs picoTDC lead/trail) without
+    #: external context. Defaults to 5202 for v1 files that predate the field.
+    board_family: int = 5202
+    #: Per-channel array width of the recording board (64 for 5202, 128 for 5203).
+    num_ch: int = NUM_CH
+    #: A5203 time-measurement mode (LEAD_ONLY / LEAD_TRAIL / LEAD_TOT8 / LEAD_TOT11);
+    #: empty for the A5202 family.
+    meas_mode: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:

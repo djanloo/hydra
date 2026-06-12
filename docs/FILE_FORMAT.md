@@ -60,17 +60,27 @@ Serialized from `FileHeader`:
 
 | Key | Type | Meaning |
 |---|---|---|
-| `format_version` | int | New-format version; `1`. |
-| `acquisition_mode` | str | `SPECT`, `TSPECT`, `TIMING`, `COUNT`, `WAVE`, `TEST`, `SERVICE`. |
-| `energy_nbins` | int | PHA/energy histogram bin count (`EHistoNbin`). |
+| `format_version` | int | New-format version; `2` (was `1`; see §2.5). |
+| `acquisition_mode` | str | `SPECT`, `TSPECT`, `TIMING`, `COUNT`, `WAVE`, `TEST`, `SERVICE`, or a 5203 mode (`COMMON_START`, …). |
+| `energy_nbins` | int | PHA/energy histogram bin count (`EHistoNbin`); on 5203 carries `LeadTrailHistoNbin`. |
 | `toa_lsb_ns` | float | ToA/ToT LSB in ns (e.g. `0.5` for 5202). |
 | `start_time` | int | Run start time, epoch milliseconds. |
-| `board_model` | str | Board model, e.g. `A5202`. |
+| `board_model` | str | Board model, e.g. `A5202` / `A5203`. |
 | `run_number` | int | Run number (`-1` if unknown). |
 | `time_unit` | str | `LSB` or `ns`. |
 | `sw_release` | str | Producing software release. |
 | `legacy` | bool | Always `false` in new files. |
+| `board_family` | int | **v2.** FERSCode of the recording board (`5202` or `5203`); lets a reader interpret records without external context. Defaults to `5202` for v1 files. |
+| `num_ch` | int | **v2.** Per-channel array width (`64` for 5202, `128` for 5203). Defaults to `64` for v1 files. |
+| `meas_mode` | str | **v2.** A5203 time-measurement mode (`LEAD_ONLY` / `LEAD_TRAIL` / `LEAD_TOT8` / `LEAD_TOT11`); empty for 5202. |
 | `extra` | object | Free-form metadata bag. |
+
+> **A5203 (picoTDC) note.** A 5203 run contains only `REC_TIMING` and
+> `REC_SERVICE` records. `REC_TIMING` already carries per-hit
+> `channel(u8) edge(u8) toa(u32) tot(u16)` (§2.3), so the picoTDC's edge flag and
+> 32-bit ToA need no new record type — only the `board_family` / `num_ch` /
+> `meas_mode` header fields above tell a reader to read the timing hits as
+> lead/trail edges over up to 128 channels rather than 5202 list data.
 
 ### 2.3 Record payload layout
 

@@ -496,14 +496,20 @@ class AcquisitionEngine:
         if self._monitors:
             info = self._monitors[0].info
             model = str(getattr(info, "model_name", "")) if info is not None else ""
+        family = self._board_family()
+        is_5203 = family == 5203
         header = FileHeader(
-            format_version=1,
             acquisition_mode=self._config_param("AcquisitionMode", "SPECTROSCOPY"),
-            energy_nbins=_parse_nbins(self._config_param("EHistoNbin", "4K")),
+            energy_nbins=_parse_nbins(
+                self._config_param("LeadTrailHistoNbin" if is_5203 else "EHistoNbin", "4K")
+            ),
             toa_lsb_ns=0.5,
             start_time=int(time.time() * 1000),
-            board_model=str(model),
+            board_model=str(model) or (f"A{family}"),
             run_number=self._run_number,
+            board_family=family,
+            num_ch=self._num_ch,
+            meas_mode=self._config_param("MeasMode", "") if is_5203 else "",
         )
         os.makedirs(data_path, exist_ok=True)
         out_path = os.path.join(data_path, f"Run{self._run_number}_list.dat")
