@@ -43,16 +43,23 @@ Branch: `feat/5203-integration`.
   ToT); `Map2DPlot` grid adapts (64→8×8, 128→8×16); fixed a pre-existing
   `update_counts` crash. Validated offscreen.
 
+- **gui family-aware tabs** (`68ab579`): conditional tabs (chosen over a device
+  tree — runs are homogeneous). config_form gained the A5203 section tables
+  (Acquisition/TDC/DataAnalysis/Adapters/RunCtrl/Output) + per-family helpers;
+  ChannelArrayDialog/BoardParams/BoardScopeForm parameterized (64/128 ch, float
+  DiscrThreshold). main_window: `_family`/`_num_ch` drive the settings tabs,
+  per-channel grid, spectra sources, map geometry, registers and HV page (5203
+  shows a "no HV" note); `_collect_config` builds the family's classes; loading
+  a different-family config rebuilds the stack. Validated offscreen.
+- **gui Connect page** (`5b5402c`): removed the per-board enable checkbox — a row
+  with a non-empty path is a board.
+
 ### Status — TODO
-- **GUI view-stack + config_form for 5203** (UX, doing WITH the user):
-  family-adaptive single window — hide HV/Spectroscopy tabs on 5203, add
-  TDC/DataAnalysis/Adapters; `_collect_config`/`_populate_forms` pick
-  `HydraConfig5203`; point the spectrum plot at `sources_for_family`. Chosen
-  approach: **conditional tabs** (simpler than a device tree, and right since
-  runs are homogeneous). `extras` CLI (`textual`/`rich`) not installed.
 - **Build + hardware**: compile `pyferslib` with **MSVC** (MinGW is discouraged —
   breaks the build), then validate on real 5202/5203. The 5202 comm is broken;
   debug when hardware is attached.
+- Optional/nice-to-have: CLI/TUI (`textual`/`rich`) 5203 awareness; `extras` not
+  installed. Live GUI run against real data once a binding is built.
 
 ### Dev environment (this machine)
 - Python **3.14** in `../hydravenv` (was empty; now has pydantic, numpy, pyyaml,
