@@ -24,8 +24,8 @@ from typing import Callable
 import numpy as np
 
 from .events import (
-    HistogramSet,
     NUM_CH,
+    _BaseHistogramSet,
     is_count,
     is_service,
     is_spect,
@@ -78,15 +78,17 @@ class StatsThread(threading.Thread):
         nboards: int,
         run_number: int,
         stats_queue: "queue.Queue[RunStatistics]",
-        histograms: HistogramSet,
+        histograms: _BaseHistogramSet,
         hist_lock: threading.Lock,
         stop_event: threading.Event,
         counting_mode: bool = False,
         on_snapshot: Callable[[RunStatistics], None] | None = None,
+        num_ch: int = NUM_CH,
     ) -> None:
         super().__init__(name="hydrafers-stats", daemon=True)
         self._tap = tap
         self._nboards = max(0, int(nboards))
+        self._num_ch = max(1, int(num_ch))
         self._run_number = int(run_number)
         self._queue = stats_queue
         self._hist = histograms
@@ -99,7 +101,7 @@ class StatsThread(threading.Thread):
         self._total_events = 0
         self._built_events = 0
         self._byte_count = 0
-        self._ch_count = np.zeros((self._nboards, NUM_CH), dtype=np.uint64)
+        self._ch_count = np.zeros((self._nboards, self._num_ch), dtype=np.uint64)
         self._per_board_events = np.zeros(self._nboards, dtype=np.uint64)
         self._per_board_bytes = np.zeros(self._nboards, dtype=np.uint64)
 
@@ -113,7 +115,7 @@ class StatsThread(threading.Thread):
         self._last_tick = self._t0
         self._last_total = 0
         self._last_bytes = 0
-        self._last_ch_count = np.zeros((self._nboards, NUM_CH), dtype=np.uint64)
+        self._last_ch_count = np.zeros((self._nboards, self._num_ch), dtype=np.uint64)
         self._last_board_events = np.zeros(self._nboards, dtype=np.uint64)
         self._last_board_bytes = np.zeros(self._nboards, dtype=np.uint64)
 
@@ -149,24 +151,25 @@ class StatsThread(threading.Thread):
 
         # Channel-occupancy tally for ICR-like per-channel trigger rate.
         if 0 <= board < self._nboards:
+            nc = self._num_ch
             if is_count(dtq):
                 counts = event.get("counts")
                 if counts is not None:
                     carr = np.asarray(counts).astype(np.uint64, copy=False)
-                    n = min(len(carr), NUM_CH)
+                    n = min(len(carr), nc)
                     self._ch_count[board, :n] += carr[:n]
             elif is_timing_only(dtq):
                 channel = event.get("channel")
                 if channel is not None:
                     chan = np.asarray(channel).astype(np.int64, copy=False)
-                    valid = (chan >= 0) & (chan < NUM_CH)
+                    valid = (chan >= 0) & (chan < nc)
                     np.add.at(self._ch_count[board], chan[valid], 1)
             elif is_spect(dtq):
                 # Each channel present in the channel mask contributes one hit.
                 chmask = int(event.get("chmask", 0))
                 if chmask:
                     bits = np.array(
-                        [(chmask >> c) & 1 for c in range(NUM_CH)], dtype=np.uint64
+                        [(chmask >> c) & 1 for c in range(nc)], dtype=np.uint64
                     )
                     self._ch_count[board] += bits
 

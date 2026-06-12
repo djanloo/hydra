@@ -101,13 +101,19 @@ class RunStatistics:
     )
 
     @staticmethod
-    def empty(nboards: int = 0, run_number: int = 0) -> "RunStatistics":
-        """Build a zeroed snapshot sized for ``nboards`` boards."""
+    def empty(
+        nboards: int = 0, run_number: int = 0, num_ch: int = NUM_CH
+    ) -> "RunStatistics":
+        """Build a zeroed snapshot sized for ``nboards`` boards x ``num_ch`` channels.
+
+        ``num_ch`` is 64 for the A5202 family and 128 for the A5203 (picoTDC).
+        """
+        nc = max(1, int(num_ch))
         return RunStatistics(
             run_number=run_number,
             per_board={i: BoardStats(index=i) for i in range(nboards)},
-            ch_trg_rate=np.zeros((nboards, NUM_CH), dtype=np.float64),
-            ch_count=np.zeros((nboards, NUM_CH), dtype=np.uint64),
+            ch_trg_rate=np.zeros((nboards, nc), dtype=np.float64),
+            ch_count=np.zeros((nboards, nc), dtype=np.uint64),
         )
 
     def copy(self) -> "RunStatistics":

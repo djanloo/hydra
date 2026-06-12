@@ -43,7 +43,7 @@ import pyferslib
 
 from .device import BoardMonitor
 from .events import (
-    HistogramSet,
+    make_histogram_set,
     map_acq_mode_family,
     map_event_building_mode,
     map_start_mode,
@@ -126,8 +126,10 @@ class AcquisitionEngine:
         self._service_stop = threading.Event()
         self._service_thread: threading.Thread | None = None
 
-        # Shared snapshots returned to frontends.
-        self._histograms = HistogramSet(0)
+        # Shared snapshots returned to frontends. Sized for the connected board
+        # family in _reindex_snapshots (5202 = energy/64ch, 5203 = lead-trail/128ch).
+        self._num_ch = 64
+        self._histograms = make_histogram_set(self._board_family(), 0)
         self._latest_stats = RunStatistics.empty(0)
         self._board_status_cache: list[BoardStatus] = []
 
@@ -276,17 +278,52 @@ class AcquisitionEngine:
         except ValueError:
             return pyfers.SortMode.DISABLED
 
+    def _board_family(self) -> int:
+        """The board family (5202/5203) this engine is configured for.
+
+        Read from the config's ``board_family`` discriminator; defaults to 5202.
+        """
+        cfg = self._config
+        if cfg is None:
+            return 5202
+        try:
+            return int(getattr(cfg, "board_family", 5202))
+        except (TypeError, ValueError):
+            return 5202
+
+    def _resolve_num_ch(self) -> int:
+        """Per-channel array width: hardware-reported count, else family default."""
+        counts = [m.num_ch for m in self._monitors if getattr(m, "num_ch", 0)]
+        if counts:
+            return max(counts)
+        return 128 if self._board_family() == 5203 else 64
+
     def _reindex_snapshots(self) -> None:
         nboards = len(self._monitors)
-        e_nbins = _parse_nbins(self._config_param("EHistoNbin", "4K"))
-        toa_nbins = _parse_nbins(self._config_param("ToAHistoNbin", "4K"))
-        mcs_nbins = _parse_nbins(self._config_param("MCSHistoNbin", "4K"))
-        with self._hist_lock:
-            self._histograms = HistogramSet(
-                nboards, e_nbins=e_nbins, toa_nbins=toa_nbins, mcs_nbins=mcs_nbins
+        family = self._board_family()
+        num_ch = self._resolve_num_ch()
+        self._num_ch = num_ch
+        if family == 5203:
+            hist = make_histogram_set(
+                5203,
+                nboards,
+                num_ch=num_ch,
+                lt_nbins=_parse_nbins(self._config_param("LeadTrailHistoNbin", "4K")),
+                tot_nbins=_parse_nbins(self._config_param("ToTHistoNbin", "1K")),
             )
+        else:
+            hist = make_histogram_set(
+                5202,
+                nboards,
+                num_ch=num_ch,
+                e_nbins=_parse_nbins(self._config_param("EHistoNbin", "4K")),
+                toa_nbins=_parse_nbins(self._config_param("ToAHistoNbin", "4K")),
+                mcs_nbins=_parse_nbins(self._config_param("MCSHistoNbin", "4K")),
+            )
+        with self._hist_lock:
+            self._histograms = hist
         with self._lock:
-            self._latest_stats = RunStatistics.empty(nboards, self._run_number)
+            self._latest_stats = RunStatistics.empty(nboards, self._run_number, num_ch)
 
     def _apply_config(self, soft: bool) -> None:
         """Push ``to_ferslib_params`` to the System, then ``System.configure``."""
@@ -392,6 +429,7 @@ class AcquisitionEngine:
                 stop_event=self._run_stop,
                 counting_mode=counting,
                 on_snapshot=self._on_stats_snapshot,
+                num_ch=self._num_ch,
             )
             self._readout = ReadoutThread(
                 self._handles,

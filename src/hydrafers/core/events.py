@@ -79,12 +79,20 @@ ACQ_MODE_MAP: dict[str, "pyfers.AcqMode"] = {
 }
 
 ACQ_MODE_FAMILY: dict[str, int] = {
+    # A5202 acquisition modes
     "SPECTROSCOPY": pyferslib.DTQ_SPECT,
     "SPECT_TIMING": pyferslib.DTQ_SPECT | pyferslib.DTQ_TIMING,
     "TIMING_CSTART": pyferslib.DTQ_TIMING,
     "TIMING_CSTOP": pyferslib.DTQ_TIMING,
     "COUNTING": pyferslib.DTQ_COUNT,
     "WAVEFORM": pyferslib.DTQ_WAVE,
+    # A5203 (picoTDC) acquisition modes -- all timing-only, except the test patterns
+    "COMMON_START": pyferslib.DTQ_TIMING,
+    "COMMON_STOP": pyferslib.DTQ_TIMING,
+    "TRG_MATCHING": pyferslib.DTQ_TIMING,
+    "STREAMING": pyferslib.DTQ_TIMING,
+    "TEST_MODE_1": pyferslib.DTQ_TEST,
+    "TEST_MODE_2": pyferslib.DTQ_TEST,
 }
 
 
@@ -355,50 +363,23 @@ def event_nbytes(event: dict[str, Any]) -> int:
     return total
 
 
-class HistogramSet:
-    """Mutable accumulator for the live histograms exposed via ``histograms()``.
+class _BaseHistogramSet:
+    """Shared scaffolding for the per-family live-histogram accumulators.
 
-    Shapes (CONTRACT.md section 4 ``histograms()``):
-      * ``e_spec_hg`` / ``e_spec_lg`` : ``[nboards, NUM_CH, e_nbins]`` uint32
-      * ``toa``                       : ``[nboards, NUM_CH, toa_nbins]`` uint32
-      * ``tot``                       : ``[nboards, NUM_CH, toa_nbins]`` uint32
-      * ``mcs``                       : ``[nboards, mcs_nbins]`` uint32 (counts vs time)
-      * ``cnt_2d``                    : ``[nboards, NUM_CH]`` uint64 (per-channel totals)
-
-    The engine owns one instance, mutated only by the stats thread. ``snapshot()``
-    returns independent copies for handing to frontends.
+    Holds the board/channel dimensions, the per-channel hit totals (``cnt_2d``,
+    shape ``[nboards, num_ch]`` uint64, common to every family) and the binning
+    helpers. Subclasses add the family-specific histograms and implement
+    :meth:`accumulate` / :meth:`reset` / :meth:`snapshot`. The engine owns one
+    instance, mutated only by the stats thread; ``snapshot()`` hands frontends
+    independent copies.
     """
 
-    def __init__(
-        self,
-        nboards: int,
-        e_nbins: int = 4096,
-        toa_nbins: int = 4096,
-        mcs_nbins: int = 4096,
-    ) -> None:
+    def __init__(self, nboards: int, num_ch: int) -> None:
         self.nboards = max(0, int(nboards))
-        self.e_nbins = max(1, int(e_nbins))
-        self.toa_nbins = max(1, int(toa_nbins))
-        self.mcs_nbins = max(1, int(mcs_nbins))
-        nb = self.nboards
-        self.e_spec_hg = np.zeros((nb, NUM_CH, self.e_nbins), dtype=np.uint32)
-        self.e_spec_lg = np.zeros((nb, NUM_CH, self.e_nbins), dtype=np.uint32)
-        self.toa = np.zeros((nb, NUM_CH, self.toa_nbins), dtype=np.uint32)
-        self.tot = np.zeros((nb, NUM_CH, self.toa_nbins), dtype=np.uint32)
-        self.mcs = np.zeros((nb, self.mcs_nbins), dtype=np.uint32)
-        self.cnt_2d = np.zeros((nb, NUM_CH), dtype=np.uint64)
-        self._mcs_bin = 0  # advancing time bin index for the MCS strip chart
+        self.num_ch = max(1, int(num_ch))
+        self.cnt_2d = np.zeros((self.nboards, self.num_ch), dtype=np.uint64)
 
-    def reset(self) -> None:
-        """Zero all histograms (called at start_run)."""
-        self.e_spec_hg.fill(0)
-        self.e_spec_lg.fill(0)
-        self.toa.fill(0)
-        self.tot.fill(0)
-        self.mcs.fill(0)
-        self.cnt_2d.fill(0)
-        self._mcs_bin = 0
-
+    # -- binning helpers (shared) --
     def _shift_index(self, values: np.ndarray, nbins: int) -> np.ndarray:
         """Clip a uint array of bin indices into ``[0, nbins)`` for safe scatter."""
         idx = values.astype(np.int64, copy=False)
@@ -412,6 +393,61 @@ class HistogramSet:
         np.clip(idx, 0, nbins - 1, out=idx)
         return idx
 
+    # -- interface (overridden) --
+    def reset(self) -> None:  # pragma: no cover - overridden
+        self.cnt_2d.fill(0)
+
+    def accumulate(self, event: dict[str, Any]) -> None:  # pragma: no cover
+        raise NotImplementedError
+
+    def advance_mcs_bin(self) -> None:
+        """No-op by default; the MCS strip chart exists only on the 5202 family."""
+
+    def snapshot(self) -> dict[str, np.ndarray]:  # pragma: no cover - overridden
+        return {"cnt_2d": np.array(self.cnt_2d, copy=True)}
+
+
+class HistogramSet(_BaseHistogramSet):
+    """A5202 live histograms (energy + per-channel ToA/ToT + MCS strip).
+
+    Shapes (CONTRACT.md section 4 ``histograms()``):
+      * ``e_spec_hg`` / ``e_spec_lg`` : ``[nboards, num_ch, e_nbins]`` uint32
+      * ``toa``                       : ``[nboards, num_ch, toa_nbins]`` uint32
+      * ``tot``                       : ``[nboards, num_ch, toa_nbins]`` uint32
+      * ``mcs``                       : ``[nboards, mcs_nbins]`` uint32 (counts vs time)
+      * ``cnt_2d``                    : ``[nboards, num_ch]`` uint64 (per-channel totals)
+    """
+
+    def __init__(
+        self,
+        nboards: int,
+        e_nbins: int = 4096,
+        toa_nbins: int = 4096,
+        mcs_nbins: int = 4096,
+        num_ch: int = NUM_CH,
+    ) -> None:
+        super().__init__(nboards, num_ch)
+        self.e_nbins = max(1, int(e_nbins))
+        self.toa_nbins = max(1, int(toa_nbins))
+        self.mcs_nbins = max(1, int(mcs_nbins))
+        nb, nc = self.nboards, self.num_ch
+        self.e_spec_hg = np.zeros((nb, nc, self.e_nbins), dtype=np.uint32)
+        self.e_spec_lg = np.zeros((nb, nc, self.e_nbins), dtype=np.uint32)
+        self.toa = np.zeros((nb, nc, self.toa_nbins), dtype=np.uint32)
+        self.tot = np.zeros((nb, nc, self.toa_nbins), dtype=np.uint32)
+        self.mcs = np.zeros((nb, self.mcs_nbins), dtype=np.uint32)
+        self._mcs_bin = 0  # advancing time bin index for the MCS strip chart
+
+    def reset(self) -> None:
+        """Zero all histograms (called at start_run)."""
+        self.e_spec_hg.fill(0)
+        self.e_spec_lg.fill(0)
+        self.toa.fill(0)
+        self.tot.fill(0)
+        self.mcs.fill(0)
+        self.cnt_2d.fill(0)
+        self._mcs_bin = 0
+
     def accumulate(self, event: dict[str, Any]) -> None:
         """Fold one extracted event into the histograms.
 
@@ -424,7 +460,6 @@ class HistogramSet:
         dtq = int(event.get("dtq", -1))
         if dtq < 0:
             return
-
         if is_spect(dtq):
             self._accumulate_spect(board, event)
         if is_timing_only(dtq):
@@ -433,27 +468,26 @@ class HistogramSet:
             self._accumulate_count(board, event)
 
     def _accumulate_spect(self, board: int, event: dict[str, Any]) -> None:
+        nc = self.num_ch
         hg = event.get("energy_hg")
         lg = event.get("energy_lg")
         if hg is not None:
             idx = self._bin_scale(np.asarray(hg), 14, self.e_nbins)
-            ch = np.arange(min(len(idx), NUM_CH))
+            ch = np.arange(min(len(idx), nc))
             np.add.at(self.e_spec_hg, (board, ch, idx[: len(ch)]), 1)
         if lg is not None:
             idx = self._bin_scale(np.asarray(lg), 14, self.e_nbins)
-            ch = np.arange(min(len(idx), NUM_CH))
+            ch = np.arange(min(len(idx), nc))
             np.add.at(self.e_spec_lg, (board, ch, idx[: len(ch)]), 1)
         # TSPECT carries per-channel ToA/ToT too.
         toa = event.get("toa")
         tot = event.get("tot")
-        if toa is not None and np.asarray(toa).ndim == 1 and len(np.asarray(toa)) >= NUM_CH:
-            idx = self._shift_index(np.asarray(toa)[:NUM_CH], self.toa_nbins)
-            ch = np.arange(NUM_CH)
-            np.add.at(self.toa, (board, ch, idx), 1)
-        if tot is not None and np.asarray(tot).ndim == 1 and len(np.asarray(tot)) >= NUM_CH:
-            idx = self._shift_index(np.asarray(tot)[:NUM_CH], self.toa_nbins)
-            ch = np.arange(NUM_CH)
-            np.add.at(self.tot, (board, ch, idx), 1)
+        if toa is not None and np.asarray(toa).ndim == 1 and len(np.asarray(toa)) >= nc:
+            idx = self._shift_index(np.asarray(toa)[:nc], self.toa_nbins)
+            np.add.at(self.toa, (board, np.arange(nc), idx), 1)
+        if tot is not None and np.asarray(tot).ndim == 1 and len(np.asarray(tot)) >= nc:
+            idx = self._shift_index(np.asarray(tot)[:nc], self.toa_nbins)
+            np.add.at(self.tot, (board, np.arange(nc), idx), 1)
 
     def _accumulate_timing(self, board: int, event: dict[str, Any]) -> None:
         channel = event.get("channel")
@@ -462,17 +496,15 @@ class HistogramSet:
         if channel is None:
             return
         chan = np.asarray(channel).astype(np.int64, copy=False)
-        valid = (chan >= 0) & (chan < NUM_CH)
+        valid = (chan >= 0) & (chan < self.num_ch)
         if not valid.any():
             return
         chan = chan[valid]
         if toa is not None:
-            tarr = np.asarray(toa)[valid]
-            idx = self._shift_index(tarr, self.toa_nbins)
+            idx = self._shift_index(np.asarray(toa)[valid], self.toa_nbins)
             np.add.at(self.toa, (board, chan, idx), 1)
         if tot is not None:
-            totarr = np.asarray(tot)[valid]
-            idx = self._shift_index(totarr, self.toa_nbins)
+            idx = self._shift_index(np.asarray(tot)[valid], self.toa_nbins)
             np.add.at(self.tot, (board, chan, idx), 1)
         np.add.at(self.cnt_2d, (board, chan), 1)
 
@@ -481,11 +513,10 @@ class HistogramSet:
         if counts is None:
             return
         carr = np.asarray(counts).astype(np.uint64, copy=False)
-        n = min(len(carr), NUM_CH)
+        n = min(len(carr), self.num_ch)
         self.cnt_2d[board, :n] += carr[:n]
         # MCS strip: total counts in this event accumulate into the current time bin.
-        total = int(carr.sum())
-        self.mcs[board, self._mcs_bin % self.mcs_nbins] += total
+        self.mcs[board, self._mcs_bin % self.mcs_nbins] += int(carr.sum())
 
     def advance_mcs_bin(self) -> None:
         """Advance the MCS time bin (called once per stats tick in counting mode)."""
@@ -501,3 +532,114 @@ class HistogramSet:
             "mcs": np.array(self.mcs, copy=True),
             "cnt_2d": np.array(self.cnt_2d, copy=True),
         }
+
+
+class HistogramSet5203(_BaseHistogramSet):
+    """A5203 (picoTDC) live histograms: Lead/Trail timing + ToT, per channel.
+
+    Pure timing-only data (no energy spectra). Hits in the list events are split
+    by their ``edge`` flag (0 = leading, 1 = trailing) into separate ToA
+    histograms, with the time-over-threshold folded into ``tot``:
+
+      * ``lead``   : ``[nboards, num_ch, lt_nbins]`` uint32 (leading-edge ToA)
+      * ``trail``  : ``[nboards, num_ch, lt_nbins]`` uint32 (trailing-edge ToA)
+      * ``tot``    : ``[nboards, num_ch, tot_nbins]`` uint32 (time over threshold)
+      * ``cnt_2d`` : ``[nboards, num_ch]`` uint64 (per-channel hit totals)
+
+    The split-by-edge layout is intentionally kept agile so the histogram set can
+    follow the MeasMode under test (LEAD_ONLY / LEAD_TRAIL / LEAD_TOT*).
+    """
+
+    def __init__(
+        self,
+        nboards: int,
+        lt_nbins: int = 4096,
+        tot_nbins: int = 1024,
+        num_ch: int = 128,
+    ) -> None:
+        super().__init__(nboards, num_ch)
+        self.lt_nbins = max(1, int(lt_nbins))
+        self.tot_nbins = max(1, int(tot_nbins))
+        nb, nc = self.nboards, self.num_ch
+        self.lead = np.zeros((nb, nc, self.lt_nbins), dtype=np.uint32)
+        self.trail = np.zeros((nb, nc, self.lt_nbins), dtype=np.uint32)
+        self.tot = np.zeros((nb, nc, self.tot_nbins), dtype=np.uint32)
+
+    def reset(self) -> None:
+        self.lead.fill(0)
+        self.trail.fill(0)
+        self.tot.fill(0)
+        self.cnt_2d.fill(0)
+
+    def accumulate(self, event: dict[str, Any]) -> None:
+        board = int(event.get("board", -1))
+        if board < 0 or board >= self.nboards:
+            return
+        if not is_timing_only(int(event.get("dtq", -1))):
+            return
+        channel = event.get("channel")
+        if channel is None:
+            return
+        chan = np.asarray(channel).astype(np.int64, copy=False)
+        valid = (chan >= 0) & (chan < self.num_ch)
+        if not valid.any():
+            return
+        chan = chan[valid]
+        toa = event.get("toa")
+        tot = event.get("tot")
+        edge = event.get("edge")
+
+        if toa is not None:
+            toa_v = np.asarray(toa)[valid]
+            idx = self._shift_index(toa_v, self.lt_nbins)
+            if edge is not None:
+                ev = np.asarray(edge)[valid].astype(np.int64, copy=False)
+                is_trail = ev != 0
+                lead_sel = ~is_trail
+                if lead_sel.any():
+                    np.add.at(self.lead, (board, chan[lead_sel], idx[lead_sel]), 1)
+                if is_trail.any():
+                    np.add.at(self.trail, (board, chan[is_trail], idx[is_trail]), 1)
+            else:
+                # No edge info -> treat every hit as a leading edge.
+                np.add.at(self.lead, (board, chan, idx), 1)
+        if tot is not None:
+            idx = self._shift_index(np.asarray(tot)[valid], self.tot_nbins)
+            np.add.at(self.tot, (board, chan, idx), 1)
+        np.add.at(self.cnt_2d, (board, chan), 1)
+
+    def snapshot(self) -> dict[str, np.ndarray]:
+        return {
+            "lead": np.array(self.lead, copy=True),
+            "trail": np.array(self.trail, copy=True),
+            "tot": np.array(self.tot, copy=True),
+            "cnt_2d": np.array(self.cnt_2d, copy=True),
+        }
+
+
+def make_histogram_set(
+    family: int,
+    nboards: int,
+    *,
+    num_ch: int | None = None,
+    e_nbins: int = 4096,
+    toa_nbins: int = 4096,
+    mcs_nbins: int = 4096,
+    lt_nbins: int = 4096,
+    tot_nbins: int = 1024,
+) -> _BaseHistogramSet:
+    """Build the live-histogram accumulator for a board *family*.
+
+    ``family=5203`` returns a :class:`HistogramSet5203` (Lead/Trail/ToT, 128 ch by
+    default); anything else returns the A5202 :class:`HistogramSet` (energy +
+    ToA/ToT + MCS, 64 ch by default). ``num_ch`` overrides the per-family default.
+    """
+    if int(family) == 5203:
+        return HistogramSet5203(
+            nboards, lt_nbins=lt_nbins, tot_nbins=tot_nbins,
+            num_ch=128 if num_ch is None else num_ch,
+        )
+    return HistogramSet(
+        nboards, e_nbins=e_nbins, toa_nbins=toa_nbins, mcs_nbins=mcs_nbins,
+        num_ch=NUM_CH if num_ch is None else num_ch,
+    )
