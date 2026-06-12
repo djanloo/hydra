@@ -77,6 +77,20 @@ def test_mainwindow_runtime_family_switch(qapp):
         w.deleteLater()
 
 
+def test_connect_rows_have_no_enable_checkbox(qapp):
+    # A row is a board iff its path is non-empty — the per-board enable checkbox
+    # was removed, so each row tuple is (path_edit, pid, model, fw, row_widget).
+    w = MainWindow(config=default_config(5202))
+    try:
+        assert len(w._board_path_rows[0]) == 5
+        assert w._connect_paths() == ["eth:192.168.50.3"]
+        # typing a path in the trailing row makes it a second board, no toggle
+        w._board_path_rows[-1][0].setText("usb:5")
+        assert w._connect_paths() == ["eth:192.168.50.3", "usb:5"]
+    finally:
+        w.deleteLater()
+
+
 def test_collect_config_matches_family(qapp):
     from hydrafers.config import HydraConfig, HydraConfig5203
 

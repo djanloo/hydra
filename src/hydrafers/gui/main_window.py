@@ -215,9 +215,10 @@ class MainWindow(QMainWindow):
         self._tick_div = 0
         self._freeze = False
 
-        # Board path rows state cache (QCheckBox, QLineEdit, *info_labels)
+        # Board path rows state cache (path_edit, pid, model, fw, row_widget).
+        # A row defines a board iff its path is non-empty — no enable checkbox.
         self._board_path_rows: list[
-            tuple[QCheckBox, QLineEdit, QLabel, QLabel, QLabel]
+            tuple[QLineEdit, QLabel, QLabel, QLabel, QWidget]
         ] = []
 
         # 64 QLabels for the statistics grid (filled in _build_run_statistics_page)
@@ -424,6 +425,7 @@ class MainWindow(QMainWindow):
 
         hint = QLabel(
             "Enter one connection path per board (e.g. eth:192.168.50.3, usb:0). "
+            "Any row with a path is a board to connect to. "
             "Paths are editable only while disconnected."
         )
         hint.setObjectName("FieldLabel")
@@ -433,7 +435,7 @@ class MainWindow(QMainWindow):
         # Column headers
         hdr_row = QHBoxLayout()
         hdr_row.setSpacing(8)
-        for text, width in [("Brd", 36), ("En", 36), ("Connection Path", 300),
+        for text, width in [("Brd", 36), ("Connection Path", 300),
                              ("PID", 80), ("Model", 130), ("FPGA FW", 180)]:
             lbl = QLabel(text)
             lbl.setObjectName("FieldLabel")
@@ -452,7 +454,7 @@ class MainWindow(QMainWindow):
         # Seed from the active config (one enabled row per board), then make sure
         # there is one empty trailing row to grow into.
         for board in (self._config.boards if self._config else []):
-            self._add_board_row(path=board.Open, enabled=True)
+            self._add_board_row(path=board.Open)
         self._ensure_trailing_empty_row()
 
         # "Add board" button under the rows.
@@ -473,8 +475,12 @@ class MainWindow(QMainWindow):
         return scroll
 
     # ----------------------------------------------------------- board rows
-    def _add_board_row(self, path: str = "", enabled: bool = False):
-        """Append one board-connection row; returns its widget tuple."""
+    def _add_board_row(self, path: str = ""):
+        """Append one board-connection row; returns its widget tuple.
+
+        A row is a board to connect to iff its path is non-empty — there is no
+        per-row enable checkbox.
+        """
         if len(self._board_path_rows) >= _MAX_BOARDS:
             return None
 
@@ -489,17 +495,11 @@ class MainWindow(QMainWindow):
         num_lbl.setFixedWidth(36)
         brow.addWidget(num_lbl)
 
-        enable_cb = QCheckBox()
-        enable_cb.setFixedWidth(36)
         path_edit = QLineEdit()
         path_edit.setFixedWidth(300)
         path_edit.setPlaceholderText("eth:192.168.50.3  or  usb:0")
-
-        # Set initial state BEFORE wiring signals so seeding doesn't fire handlers.
-        enable_cb.setChecked(enabled)
+        # Set initial text BEFORE wiring signals so seeding doesn't fire handlers.
         path_edit.setText(path)
-
-        brow.addWidget(enable_cb)
         brow.addWidget(path_edit)
 
         pid_lbl   = QLabel("—"); pid_lbl.setFixedWidth(80);   pid_lbl.setObjectName("FieldValue")
@@ -522,16 +522,13 @@ class MainWindow(QMainWindow):
         row._num_lbl = num_lbl
         row._remove_btn = remove_btn
 
-        # Wiring: activating a row (enable or a typed path) grows a new trailing row.
-        enable_cb.toggled.connect(self._ensure_trailing_empty_row)
-        enable_cb.toggled.connect(self._sync_board_count)
-        enable_cb.toggled.connect(self._mark_dirty)
+        # Wiring: typing a path grows a new trailing row and resyncs the board count.
         path_edit.editingFinished.connect(self._ensure_trailing_empty_row)
         path_edit.editingFinished.connect(self._sync_board_count)
         path_edit.textEdited.connect(self._mark_dirty)
 
         self._board_path_rows.append(
-            (enable_cb, path_edit, pid_lbl, model_lbl, fw_lbl, row)
+            (path_edit, pid_lbl, model_lbl, fw_lbl, row)
         )
         self._board_rows_layout.addWidget(row)
         self._renumber_board_rows()
@@ -542,8 +539,8 @@ class MainWindow(QMainWindow):
         if len(self._board_path_rows) >= _MAX_BOARDS:
             return
         if self._board_path_rows:
-            enable_cb, path_edit, *_ = self._board_path_rows[-1]
-            if not (enable_cb.isChecked() or path_edit.text().strip()):
+            path_edit = self._board_path_rows[-1][0]
+            if not path_edit.text().strip():
                 return
         self._add_board_row()
 
@@ -566,7 +563,7 @@ class MainWindow(QMainWindow):
         self._mark_dirty()
 
     def _renumber_board_rows(self) -> None:
-        for i, (_cb, _pe, _pid, _model, _fw, row) in enumerate(self._board_path_rows):
+        for i, (_pe, _pid, _model, _fw, row) in enumerate(self._board_path_rows):
             row._num_lbl.setText(str(i))
 
     def _build_settings_page(self) -> QWidget:
@@ -1091,11 +1088,11 @@ class MainWindow(QMainWindow):
         )
 
     def _connect_paths(self) -> list[str]:
-        """Enabled, non-empty board paths from the Connect page rows."""
+        """Non-empty board paths from the Connect page rows (a path = a board)."""
         paths: list[str] = []
-        for enable_cb, path_edit, *_ in self._board_path_rows:
+        for path_edit, *_ in self._board_path_rows:
             path = path_edit.text().strip()
-            if enable_cb.isChecked() and path:
+            if path:
                 paths.append(path)
         if not paths:
             if self._config.boards:
@@ -1282,9 +1279,8 @@ class MainWindow(QMainWindow):
 
         # Board rows editable / add-removable only when disconnected
         editable = (state == AcqState.DISCONNECTED or state == AcqState.ERROR)
-        for enable_cb, path_edit, _pid, _model, _fw, row in self._board_path_rows:
+        for path_edit, _pid, _model, _fw, row in self._board_path_rows:
             path_edit.setReadOnly(not editable)
-            enable_cb.setEnabled(editable)
             row._remove_btn.setEnabled(editable)
         if hasattr(self, "_btn_add_board"):
             self._btn_add_board.setEnabled(editable)
@@ -1292,11 +1288,8 @@ class MainWindow(QMainWindow):
     # ================================================================ Connect page helpers
 
     def _active_board_rows(self) -> list[tuple]:
-        """Rows that define a real board (enabled + non-empty path), in order."""
-        return [
-            tup for tup in self._board_path_rows
-            if tup[0].isChecked() and tup[1].text().strip()
-        ]
+        """Rows that define a real board (non-empty path), in order."""
+        return [tup for tup in self._board_path_rows if tup[0].text().strip()]
 
     def _populate_connect_board_info(self, statuses: list[BoardStatus]) -> None:
         # Board index k corresponds to the k-th active row (same order as
@@ -1305,13 +1298,13 @@ class MainWindow(QMainWindow):
         for k, st in enumerate(statuses):
             if k >= len(active):
                 break
-            _cb, _pe, pid_lbl, model_lbl, fw_lbl, _row = active[k]
+            _pe, pid_lbl, model_lbl, fw_lbl, _row = active[k]
             pid_lbl.setText(f"0x{st.pid:04X}" if st.pid else "—")
             model_lbl.setText(st.model_name or "—")
             fw_lbl.setText(st.fpga_fw or "—")
 
     def _clear_connect_board_info(self) -> None:
-        for _cb, _pe, pid_lbl, model_lbl, fw_lbl, _row in self._board_path_rows:
+        for _pe, pid_lbl, model_lbl, fw_lbl, _row in self._board_path_rows:
             for lbl in (pid_lbl, model_lbl, fw_lbl):
                 lbl.setText("—")
 
@@ -1660,13 +1653,13 @@ class MainWindow(QMainWindow):
 
     def _refresh_board_path_rows(self) -> None:
         """Rebuild the dynamic board rows from the active config."""
-        for _cb, _pe, _pid, _model, _fw, row in self._board_path_rows:
+        for _pe, _pid, _model, _fw, row in self._board_path_rows:
             self._board_rows_layout.removeWidget(row)
             row.setParent(None)
             row.deleteLater()
         self._board_path_rows.clear()
         for board in (self._config.boards if self._config else []):
-            self._add_board_row(path=board.Open, enabled=True)
+            self._add_board_row(path=board.Open)
         self._ensure_trailing_empty_row()
 
     # ================================================================ tick (15 Hz)
