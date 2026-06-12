@@ -20,12 +20,24 @@ import pyqtgraph as pg
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 # Human label + histogram-key + colour for every selectable spectrum source.
-# The key indexes the dict returned by ``AcquisitionEngine.histograms()``.
-SPECTRUM_SOURCES: dict[str, tuple[str, str]] = {
+# The key indexes the dict returned by ``AcquisitionEngine.histograms()``. Sources
+# are split per board family (the 5202 builds energy spectra; the 5203 picoTDC
+# builds lead/trail/ToT timing histograms), with a union exposed for the widget so
+# any source can be selected.
+SPECTRUM_SOURCES_5202: dict[str, tuple[str, str]] = {
     "Spectrum HG": ("e_spec_hg", "#1565c0"),
     "Spectrum LG": ("e_spec_lg", "#2e7d32"),
     "ToA": ("toa", "#ef6c00"),
     "ToT": ("tot", "#6a1b9a"),
+}
+SPECTRUM_SOURCES_5203: dict[str, tuple[str, str]] = {
+    "Lead": ("lead", "#1565c0"),
+    "Trail": ("trail", "#2e7d32"),
+    "ToT": ("tot", "#6a1b9a"),
+}
+SPECTRUM_SOURCES: dict[str, tuple[str, str]] = {
+    **SPECTRUM_SOURCES_5202,
+    **SPECTRUM_SOURCES_5203,
 }
 
 # X-axis label per source key.
@@ -34,7 +46,14 @@ _X_LABEL: dict[str, str] = {
     "e_spec_lg": "Energy [ADC channel]",
     "toa": "Time of Arrival [LSB]",
     "tot": "Time over Threshold [LSB]",
+    "lead": "Leading edge [LSB]",
+    "trail": "Trailing edge [LSB]",
 }
+
+
+def sources_for_family(family: int) -> dict[str, tuple[str, str]]:
+    """Return the selectable spectrum sources for a board family (5202/5203)."""
+    return SPECTRUM_SOURCES_5203 if int(family) == 5203 else SPECTRUM_SOURCES_5202
 
 
 class SpectrumPlot(QWidget):
