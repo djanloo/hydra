@@ -79,6 +79,30 @@ from hydrafers.config.schema import (
     VETO_SOURCE_OPTS,
     BoardConfig,
 )
+from hydrafers.config.schema_5203 import (
+    A5256_POLARITY_OPTS,
+    ACQUISITION_MODE_OPTS_5203,
+    ADAPTER_TYPE_OPTS,
+    DATA_ANALYSIS_OPTS_5203,
+    DIGITAL_PROBE_OPTS_5203,
+    EN_HEAD_TRAIL_OPTS,
+    EVENT_BUILDING_MODE_OPTS as EVENT_BUILDING_MODE_OPTS_5203,
+    GLITCH_FILTER_MODE_OPTS,
+    HIGH_RES_CLOCK_OPTS,
+    LEADTRAIL_HISTO_NBIN_OPTS,
+    MEAS_MODE_OPTS,
+    NUM_CHANNELS_5203,
+    REBIN_OPTS,
+    START_RUN_MODE_OPTS_5203,
+    STOP_RUN_MODE_OPTS as STOP_RUN_MODE_OPTS_5203,
+    T_OUT_OPTS_5203,
+    TDC_CH_BUFFER_SIZE_OPTS,
+    TOT_HISTO_NBIN_OPTS,
+    TREF_SOURCE_OPTS_5203,
+    TRIGGER_SOURCE_OPTS_5203,
+    VETO_SOURCE_OPTS_5203,
+    Board5203Config,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +301,136 @@ SECTION_TITLES: dict[str, str] = {
     "test_probe": "Test / Probe",
 }
 
+# Order of the settings sub-tabs for the A5202 family (after the Connection tab).
+SECTION_ORDER_5202: tuple[str, ...] = (
+    "acq_mode", "discr", "spectroscopy", "hv_bias",
+    "run_ctrl", "output_files", "test_probe",
+)
+
+
+# ---------------------------------------------------------------------------
+# A5203 (picoTDC) section field tables. Disjoint from the 5202 (no HV /
+# spectroscopy / analog probes; adds TDC, Data Analysis and Adapters).
+# ---------------------------------------------------------------------------
+SECTION_SPECS_5203: dict[str, list[FieldSpec]] = {
+    "acq_mode": [
+        combo("AcquisitionMode", "Acquisition Mode", ACQUISITION_MODE_OPTS_5203,
+              "picoTDC acquisition mode"),
+        combo("MeasMode", "Measurement Mode", MEAS_MODE_OPTS,
+              "Which edges/intervals the TDC captures (lead / lead+trail / lead+ToT)"),
+        combo("En_Head_Trail", "Header/Trailer", EN_HEAD_TRAIL_OPTS,
+              "Keep all header/trailer words or one-word trailer"),
+        boolean("En_Empty_Ev_Suppr", "Empty-Event Suppr",
+                "Suppress events with no hits"),
+        combo("TriggerSource", "Trigger Source", TRIGGER_SOURCE_OPTS_5203,
+              "Trigger source"),
+        combo("TrefSource", "Tref Source", TREF_SOURCE_OPTS_5203,
+              "Time-reference source"),
+        combo("VetoSource", "Veto Source", VETO_SOURCE_OPTS_5203,
+              "Veto signal (inhibits the trigger, active high)"),
+        unit("GateWidth", "Gate Width", "Gate width (rounded to 12.8 ns steps)"),
+        unit("TrgWindowWidth", "Trg Window Width", "Trigger window width (12.8 ns steps)"),
+        unit("TrgWindowOffset", "Trg Window Offset",
+             "Trigger window offset vs trigger (can be negative, 12.8 ns steps)"),
+        unit("PtrgPeriod", "Periodic Trg Period", "Internal periodic-trigger period"),
+        combo("DigitalProbe0", "Digital Probe 0", DIGITAL_PROBE_OPTS_5203,
+              "T0-OUT digital probe source"),
+        combo("DigitalProbe1", "Digital Probe 1", DIGITAL_PROBE_OPTS_5203,
+              "T1-OUT digital probe source"),
+        combo("T0_Out", "T0 Output", T_OUT_OPTS_5203, "T0 LEMO output assignment"),
+        combo("T1_Out", "T1 Output", T_OUT_OPTS_5203, "T1 LEMO output assignment"),
+    ],
+    "tdc": [
+        combo("GlitchFilterMode", "Glitch Filter", GLITCH_FILTER_MODE_OPTS,
+              "Enforce minimum pulse width/distance on leading/trailing edges"),
+        integer("ToT_reject_low_thr", "ToT Reject Low", 0, 2**31 - 1,
+                "ToT reject lower threshold (0 = disabled)"),
+        integer("ToT_reject_high_thr", "ToT Reject High", 0, 2**31 - 1,
+                "ToT reject higher threshold (0 = disabled)"),
+        combo("TDC_ChannelBufferSize", "Ch Buffer Size", TDC_CH_BUFFER_SIZE_OPTS,
+              "Max hits buffered per channel"),
+        integer("TriggerBufferSize", "Trigger Buffer Size", 0, 4096,
+                "Pending-trigger FIFO depth"),
+        unit("TDCpulser_Width", "TDC Pulser Width", "picoTDC pulser output width"),
+        unit("TDCpulser_Period", "TDC Pulser Period", "picoTDC pulser output period"),
+        combo("HighResClock", "High-Res Clock", HIGH_RES_CLOCK_OPTS,
+              "High-resolution clock distribution (MCX connectors)"),
+    ],
+    "data_analysis": [
+        combo("DataAnalysis", "Data Analysis", DATA_ANALYSIS_OPTS_5203,
+              "Analysis depth (counts / measures / histograms)"),
+        integer("LeadTrail_LSB", "Lead/Trail LSB", 0, 10,
+                "Leading/trailing LSB exponent: LSB = 3.125 ps · 2^N (max N=10)"),
+        combo("LeadTrailHistoNbin", "Lead/Trail Bins", LEADTRAIL_HISTO_NBIN_OPTS,
+              "Lead/Trail histogram bin count"),
+        combo("LeadTrailRebin", "Lead/Trail Rebin", REBIN_OPTS,
+              "Lead/Trail histogram rebin factor"),
+        unit("LeadHistoMin", "Lead Histo Min", "Minimum value in the Lead histogram"),
+        integer("ToT_LSB", "ToT LSB", 0, 18,
+                "ToT LSB exponent: LSB = 3.125 ps · 2^N (max N=18)"),
+        combo("ToTHistoNbin", "ToT Bins", TOT_HISTO_NBIN_OPTS, "ToT histogram bin count"),
+        combo("ToTRebin", "ToT Rebin", REBIN_OPTS, "ToT histogram rebin factor"),
+        unit("ToTHistoMin", "ToT Histo Min", "Minimum value in the ToT histogram"),
+        boolean("EnableWalkCorrection", "Walk Correction",
+                "Enable time-walk correction by ToT"),
+        text("WalkFitCoeff", "Walk Fit Coeff", "Walk-vs-ToT polynomial coefficients"),
+    ],
+    "adapters": [
+        combo("AdapterType", "Adapter Type", ADAPTER_TYPE_OPTS,
+              "External adapter (e.g. A5256 discriminator)"),
+        boolean("DisableThresholdCalib", "Disable Thr Calib",
+                "Disable discriminator threshold calibration"),
+        combo("A5256_Ch0Polarity", "A5256 Ch0 Polarity", A5256_POLARITY_OPTS,
+              "Input polarity of A5256 channel 0"),
+    ],
+    "run_ctrl": [
+        combo("StartRunMode", "Start Run Mode", START_RUN_MODE_OPTS_5203,
+              "Run start mode (ASYNC or TDL)"),
+        combo("StopRunMode", "Stop Run Mode", STOP_RUN_MODE_OPTS_5203, "Run stop mode"),
+        unit("PresetTime", "Preset Time", "Run duration for PRESET_TIME stop mode"),
+        real("PresetCounts", "Preset Counts", "Event count for PRESET_COUNTS stop mode"),
+        combo("EventBuildingMode", "Event Building", EVENT_BUILDING_MODE_OPTS_5203,
+              "Event building: off / sort by timestamp / by trigger-ID"),
+        unit("TrgTimeWindow", "Trg Time Window",
+             "Coincidence window for timestamp event building"),
+        boolean("EnableJobs", "Enable Jobs", "Enable multi-run jobs"),
+        integer("JobFirstRun", "Job First Run", 0, 9999, "First run of the job"),
+        integer("JobLastRun", "Job Last Run", 0, 9999, "Last run of the job"),
+        unit("RunSleep", "Run Sleep", "Wait time between job runs"),
+        boolean("RunNumber_AutoIncr", "Auto-Increment Run #",
+                "Auto-increment the run number after each run"),
+    ],
+    "output_files": [
+        text("DataFilePath", "Data File Path", "Destination folder for output files"),
+        combo("OF_OutFileUnit", "Out File Unit", OF_OUTFILE_UNIT_OPTS,
+              "ToA/ToT unit in output (LSB or ns)"),
+        boolean("OF_EnMaxSize", "Enable Max Size", "Enable list-file maximum size"),
+        unit("OF_MaxSize", "Max File Size", "Max size of list files (min 1 MB)"),
+        boolean("OF_RawData", "Raw Data", "Output raw event list"),
+        boolean("OF_ListBin", "List (binary)", "Output event list, binary"),
+        boolean("OF_ListAscii", "List (ASCII)", "Output event list, ASCII"),
+        boolean("OF_ListCSV", "List (CSV)", "Output event list, CSV"),
+        boolean("OF_Sync", "Sync Check", "Output BrdID-Tstamp-TrgID sync check"),
+        boolean("OF_ServiceInfo", "Service Info", "Output service event info"),
+        boolean("OF_RunInfo", "Run Info", "Output run info"),
+        boolean("OF_LeadHisto", "Lead Spectrum", "Output leading-edge timing spectrum"),
+        boolean("OF_ToTHisto", "ToT Spectrum", "Output ToT spectrum"),
+    ],
+}
+
+SECTION_TITLES_5203: dict[str, str] = {
+    "acq_mode": "Acquisition",
+    "tdc": "TDC",
+    "data_analysis": "Data Analysis",
+    "adapters": "Adapters",
+    "run_ctrl": "Run Control",
+    "output_files": "Output Files",
+}
+
+SECTION_ORDER_5203: tuple[str, ...] = (
+    "acq_mode", "tdc", "data_analysis", "adapters", "run_ctrl", "output_files",
+)
+
 
 # ---------------------------------------------------------------------------
 # Widget helpers
@@ -462,38 +616,57 @@ class SectionForm(QWidget):
 # Per-channel array editor dialog (8×8 grid)
 # ---------------------------------------------------------------------------
 class ChannelArrayDialog(QDialog):
-    """Modal 8×8 grid editor for a 64-element per-channel array."""
+    """Modal grid editor for a per-channel array (64 or 128 channels, int/float).
 
-    def __init__(self, title: str, values: list[int], lo: int, hi: int,
+    The grid is laid out 8 columns wide; the row count follows ``num_ch`` (64 ->
+    8×8, 128 -> 16×8). Float arrays (e.g. the A5256 discriminator threshold) use
+    double spin boxes.
+    """
+
+    _COLS = 8
+
+    def __init__(self, title: str, values: list, lo: float, hi: float,
+                 num_ch: int = NUM_CHANNELS, is_float: bool = False,
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
         self._lo, self._hi = lo, hi
-        self._spins: list[QSpinBox] = []
+        self._is_float = is_float
+        self._num_ch = max(1, int(num_ch))
+        self._spins: list = []
+
+        def _spin():
+            sp = QDoubleSpinBox() if is_float else QSpinBox()
+            sp.setRange(lo, hi)
+            if is_float:
+                sp.setDecimals(2)
+            return sp
 
         v = QVBoxLayout(self)
-        info = QLabel(f"{title}   (range {lo}–{hi})")
+        info = QLabel(f"{title}   (range {lo}–{hi}, {self._num_ch} ch)")
         info.setObjectName("CardTitle")
         v.addWidget(info)
 
+        rows = (self._num_ch + self._COLS - 1) // self._COLS
         grid = QGridLayout()
         grid.setSpacing(4)
-        # header columns
-        for c in range(8):
+        for c in range(self._COLS):
             h = QLabel(f"+{c}")
             h.setObjectName("FieldLabel")
             h.setAlignment(Qt.AlignmentFlag.AlignCenter)
             grid.addWidget(h, 0, c + 1)
-        for r in range(8):
-            rh = QLabel(f"{r * 8:>2}")
+        for r in range(rows):
+            rh = QLabel(f"{r * self._COLS:>3}")
             rh.setObjectName("FieldLabel")
             grid.addWidget(rh, r + 1, 0)
-            for c in range(8):
-                ch = r * 8 + c
-                sp = QSpinBox()
-                sp.setRange(lo, hi)
-                sp.setValue(int(values[ch]) if ch < len(values) else lo)
-                sp.setFixedWidth(78)
+            for c in range(self._COLS):
+                ch = r * self._COLS + c
+                if ch >= self._num_ch:
+                    break
+                sp = _spin()
+                sp.setValue((float(values[ch]) if is_float else int(values[ch]))
+                            if ch < len(values) else lo)
+                sp.setFixedWidth(82)
                 self._spins.append(sp)
                 grid.addWidget(sp, r + 1, c + 1)
         v.addLayout(grid)
@@ -501,8 +674,7 @@ class ChannelArrayDialog(QDialog):
         # Fill-all helper
         fill_row = QHBoxLayout()
         fill_row.addWidget(QLabel("Set all to:"))
-        self._fill = QSpinBox()
-        self._fill.setRange(lo, hi)
+        self._fill = _spin()
         fill_row.addWidget(self._fill)
         btn_fill = QPushButton("Apply to all")
         btn_fill.clicked.connect(self._apply_all)
@@ -522,7 +694,7 @@ class ChannelArrayDialog(QDialog):
         for sp in self._spins:
             sp.setValue(val)
 
-    def values(self) -> list[int]:
+    def values(self) -> list:
         return [sp.value() for sp in self._spins]
 
 
@@ -569,8 +741,64 @@ CHANNEL_ARRAYS: dict[str, list[tuple[str, str, int, int]]] = {
 }
 
 
-def _default_board_dict() -> dict:
-    d = BoardConfig().model_dump()
+# --- A5203 per-board / per-channel parameter groupings -----------------------
+# Channel-array entries may carry an optional 5th element "float" to mark a
+# floating-point per-channel array (e.g. the A5256 discriminator threshold, mV).
+BOARD_SCALARS_5203: dict[str, list[FieldSpec]] = {
+    "acq_mode": [
+        hexmask("ChEnableMask0", "Ch Enable Mask 0", "Channel enable mask, ch 0–31 (hex)"),
+        hexmask("ChEnableMask1", "Ch Enable Mask 1", "Channel enable mask, ch 32–63 (hex)"),
+        hexmask("ChEnableMask2", "Ch Enable Mask 2", "Channel enable mask, ch 64–95 (hex)"),
+        hexmask("ChEnableMask3", "Ch Enable Mask 3", "Channel enable mask, ch 96–127 (hex)"),
+    ],
+    "tdc": [
+        integer("GlitchFilterDelay", "Glitch Filter Delay", 0, 15,
+                "Glitch-filter delay (~800 ps to ~10 ns, 16 steps)"),
+    ],
+}
+
+CHANNEL_ARRAYS_5203: dict[str, list[tuple]] = {
+    "adapters": [
+        ("DiscrThreshold", "Discriminator Threshold (mV)", -1000, 1000, "float"),
+    ],
+}
+
+
+# ---------------------------------------------------------------------------
+# Per-family selection helpers. A config file targets exactly one family
+# (never mixed); these return the right spec tables / board class / channel
+# count so the GUI builders are written once and parameterized by family.
+# ---------------------------------------------------------------------------
+def section_order(family: int) -> tuple[str, ...]:
+    return SECTION_ORDER_5203 if int(family) == 5203 else SECTION_ORDER_5202
+
+
+def section_specs(family: int) -> dict[str, list[FieldSpec]]:
+    return SECTION_SPECS_5203 if int(family) == 5203 else SECTION_SPECS
+
+
+def section_titles(family: int) -> dict[str, str]:
+    return SECTION_TITLES_5203 if int(family) == 5203 else SECTION_TITLES
+
+
+def board_scalars(family: int) -> dict[str, list[FieldSpec]]:
+    return BOARD_SCALARS_5203 if int(family) == 5203 else BOARD_SCALARS
+
+
+def channel_arrays(family: int) -> dict[str, list[tuple]]:
+    return CHANNEL_ARRAYS_5203 if int(family) == 5203 else CHANNEL_ARRAYS
+
+
+def board_class(family: int) -> type:
+    return Board5203Config if int(family) == 5203 else BoardConfig
+
+
+def num_channels(family: int) -> int:
+    return NUM_CHANNELS_5203 if int(family) == 5203 else NUM_CHANNELS
+
+
+def _default_board_dict(board_cls: type = BoardConfig) -> dict:
+    d = board_cls().model_dump()
     d.pop("Open", None)
     return d
 
@@ -587,9 +815,10 @@ class BoardParams(QObject):
     board_changed = Signal(int)
     count_changed = Signal(int)
 
-    def __init__(self) -> None:
+    def __init__(self, board_cls: type = BoardConfig) -> None:
         super().__init__()
-        self._boards: list[dict] = [_default_board_dict()]
+        self._board_cls = board_cls
+        self._boards: list[dict] = [_default_board_dict(board_cls)]
         self._cur = 0
         self._paths: list[str] = []
 
@@ -616,7 +845,7 @@ class BoardParams(QObject):
     def set_count(self, n: int, paths: list[str] | None = None) -> None:
         n = max(1, n)
         while len(self._boards) < n:
-            self._boards.append(_default_board_dict())
+            self._boards.append(_default_board_dict(self._board_cls))
         while len(self._boards) > n:
             self._boards.pop()
         if paths is not None:
@@ -633,7 +862,7 @@ class BoardParams(QObject):
             d.pop("Open", None)
             self._boards.append(d)
         if not self._boards:
-            self._boards = [_default_board_dict()]
+            self._boards = [_default_board_dict(self._board_cls)]
         self._cur = 0
         self._paths = [b.Open for b in boards]
         self.count_changed.emit(len(self._boards))
@@ -651,15 +880,20 @@ class BoardScopeForm(QWidget):
 
     def __init__(self, params: BoardParams,
                  scalars: list[FieldSpec],
-                 arrays: list[tuple[str, str, int, int]],
-                 parent: QWidget | None = None) -> None:
+                 arrays: list[tuple],
+                 parent: QWidget | None = None,
+                 num_ch: int = NUM_CHANNELS) -> None:
         super().__init__(parent)
         self._p = params
         self._scalars = scalars
-        self._arrays = arrays
+        # Normalize array specs to (key, label, lo, hi, is_float).
+        self._arrays = [
+            (a[0], a[1], a[2], a[3], (len(a) > 4 and a[4] == "float")) for a in arrays
+        ]
+        self._num_ch = max(1, int(num_ch))
         self._suppress = False
         self._scalar_widgets: dict[str, QWidget] = {}
-        self._array_bcast: dict[str, QSpinBox] = {}
+        self._array_bcast: dict[str, QWidget] = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 12, 0, 0)
@@ -716,20 +950,24 @@ class BoardScopeForm(QWidget):
             grid.addWidget(self._hdr("Parameter"), 0, 0)
             grid.addWidget(self._hdr("Broadcast value"), 0, 1)
             grid.addWidget(self._hdr(""), 0, 2)
-            for r, (key, label, lo, hi) in enumerate(arrays, start=1):
+            for r, (key, label, lo, hi, is_float) in enumerate(self._arrays, start=1):
                 lbl = QLabel(label + ":")
                 lbl.setObjectName("FieldLabel")
                 grid.addWidget(lbl, r, 0)
-                bsp = QSpinBox()
+                bsp = QDoubleSpinBox() if is_float else QSpinBox()
                 bsp.setRange(lo, hi)
+                if is_float:
+                    bsp.setDecimals(2)
                 bsp.setToolTip(f"Set every channel to this value (range {lo}–{hi})")
                 self._array_bcast[key] = bsp
                 grid.addWidget(bsp, r, 1)
                 btn_all = QPushButton("Set all")
                 btn_all.clicked.connect(lambda _=False, k=key: self._broadcast(k))
                 btn_edit = QPushButton("Per-channel…")
-                btn_edit.clicked.connect(lambda _=False, k=key, ll=label, a=lo, b=hi:
-                                         self._edit(k, ll, a, b))
+                btn_edit.clicked.connect(
+                    lambda _=False, k=key, ll=label, a=lo, b=hi, f=is_float:
+                    self._edit(k, ll, a, b, f)
+                )
                 hb = QHBoxLayout()
                 hb.setContentsMargins(0, 0, 0, 0)
                 hb.addWidget(btn_all)
@@ -769,8 +1007,8 @@ class BoardScopeForm(QWidget):
             d = self._p.dict(idx)
             for spec in self._scalars:
                 _set_widget(self._scalar_widgets[spec.key], spec, d[spec.key])
-            for key, _label, lo, _hi in self._arrays:
-                vals = d.get(key, [lo] * NUM_CHANNELS)
+            for key, _label, lo, _hi, _f in self._arrays:
+                vals = d.get(key, [lo] * self._num_ch)
                 self._array_bcast[key].setValue(vals[0] if vals else lo)
         finally:
             self._suppress = False
@@ -791,12 +1029,14 @@ class BoardScopeForm(QWidget):
 
     def _broadcast(self, key: str) -> None:
         val = self._array_bcast[key].value()
-        self._p.dict(self._p.current())[key] = [val] * NUM_CHANNELS
+        self._p.dict(self._p.current())[key] = [val] * self._num_ch
         self.changed.emit()
 
-    def _edit(self, key: str, label: str, lo: int, hi: int) -> None:
-        cur = self._p.dict(self._p.current()).get(key, [lo] * NUM_CHANNELS)
-        dlg = ChannelArrayDialog(label, cur, lo, hi, self)
+    def _edit(self, key: str, label: str, lo, hi, is_float: bool = False) -> None:
+        cur = self._p.dict(self._p.current()).get(key, [lo] * self._num_ch)
+        dlg = ChannelArrayDialog(
+            label, cur, lo, hi, num_ch=self._num_ch, is_float=is_float, parent=self
+        )
         if dlg.exec() == QDialog.DialogCode.Accepted:
             vals = dlg.values()
             self._p.dict(self._p.current())[key] = vals

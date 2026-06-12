@@ -48,21 +48,33 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from hydrafers.config import HydraConfig, default_config, load_config, save_config
-from hydrafers.config.schema import BoardConfig
+from hydrafers.config import (
+    HydraConfig,
+    HydraConfig5203,
+    default_config,
+    load_config,
+    save_config,
+)
+from hydrafers.gui import config_form
 from hydrafers.gui.config_form import (
-    BOARD_SCALARS,
-    CHANNEL_ARRAYS,
-    SECTION_SPECS,
-    SECTION_TITLES,
     BoardParams,
     BoardScopeForm,
     SectionForm,
+    board_class,
+    board_scalars,
+    channel_arrays,
+    num_channels,
+    section_order,
+    section_specs,
+    section_titles,
 )
 from hydrafers.gui.icons import NEUTRAL, ON_COLOR, icon
 from hydrafers.core import AcqState, AcquisitionEngine, BoardStatus, RunStatistics
 from hydrafers.gui.plots.map2d import Map2DPlot
-from hydrafers.gui.plots.spectrum import SPECTRUM_SOURCES, SpectrumPlot
+from hydrafers.gui.plots.spectrum import SpectrumPlot, sources_for_family
+
+# Top-level config model per board family (used to rebuild a validated config).
+_CONFIG_CLASS = {5202: HydraConfig, 5203: HydraConfig5203}
 from hydrafers.gui.widgets.led import Led
 from hydrafers.gui.widgets.sidebar import Sidebar
 from hydrafers.gui.widgets.status_table import StatusBadge, StatusTable
@@ -195,6 +207,10 @@ class MainWindow(QMainWindow):
             else:
                 self._config = default_config()
         self._engine = AcquisitionEngine(self._config)
+        # Board family of the active config drives which tabs/pages/plots are
+        # shown (5202 = energy/HV/64ch, 5203 = picoTDC/no-HV/lead-trail/128ch).
+        self._family = int(getattr(self._config, "board_family", 5202))
+        self._num_ch = num_channels(self._family)
         self._op_thread: _EngineOp | None = None
         self._tick_div = 0
         self._freeze = False
@@ -563,21 +579,20 @@ class MainWindow(QMainWindow):
         self._section_forms: dict[str, SectionForm] = {}
         self._board_scope_forms: list[BoardScopeForm] = []
         # Shared per-board model: every section's board/channel editor binds to it,
-        # so switching board on one tab switches it everywhere.
-        self._board_params = BoardParams()
+        # so switching board on one tab switches it everywhere. The board class
+        # follows the active family (BoardConfig vs Board5203Config).
+        self._board_params = BoardParams(board_class(self._family))
 
         # Connection is configuration too (board addresses are saved in the
         # config and needed to fully reproduce an acquisition), so it's the
         # first Settings tab. Built after _board_params so its rows can sync it.
         tabs.addTab(self._build_connect_page(), "Connection")
 
-        # One tab per functional section. Each tab stacks the section's global
-        # params and (where they exist) its own per-board / per-channel params —
-        # matching the legacy Janus tabs, so e.g. the Discriminator tab holds the
-        # T/Q thresholds and masks, not a separate catch-all tab.
-        for name in ("acq_mode", "discr", "spectroscopy", "hv_bias",
-                     "run_ctrl", "output_files", "test_probe"):
-            tabs.addTab(self._build_section_tab(name), SECTION_TITLES[name])
+        # One tab per functional section, in the family's order (the A5203 has
+        # no HV/Spectroscopy/Test-Probe and adds TDC/Data Analysis/Adapters).
+        titles = section_titles(self._family)
+        for name in section_order(self._family):
+            tabs.addTab(self._build_section_tab(name), titles[name])
 
         vbox.addWidget(tabs, 1)
 
@@ -645,14 +660,17 @@ class MainWindow(QMainWindow):
         col.setContentsMargins(16, 14, 16, 14)
         col.setSpacing(12)
 
-        form = SectionForm(SECTION_SPECS[name])
+        form = SectionForm(section_specs(self._family)[name])
         self._section_forms[name] = form
         col.addWidget(form)
 
-        scalars = BOARD_SCALARS.get(name)
-        arrays = CHANNEL_ARRAYS.get(name)
+        scalars = board_scalars(self._family).get(name)
+        arrays = channel_arrays(self._family).get(name)
         if scalars or arrays:
-            bsf = BoardScopeForm(self._board_params, scalars or [], arrays or [])
+            bsf = BoardScopeForm(
+                self._board_params, scalars or [], arrays or [],
+                num_ch=self._num_ch,
+            )
             self._board_scope_forms.append(bsf)
             col.addWidget(bsf)
 
@@ -713,7 +731,9 @@ class MainWindow(QMainWindow):
         ctrl.addStretch(1)
         vbox.addLayout(ctrl)
 
-        # --- 8×8 channel grid ---
+        # --- channel grid (8 cols; rows follow the family's channel count) ---
+        _COLS = 8
+        nrows = (self._num_ch + _COLS - 1) // _COLS
         grid_card = QFrame()
         grid_card.setObjectName("Card")
         grid_outer = QVBoxLayout(grid_card)
@@ -733,7 +753,7 @@ class MainWindow(QMainWindow):
         corner.setObjectName("FieldLabel")
         corner.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         cells.addWidget(corner, 0, 0)
-        for c in range(8):
+        for c in range(_COLS):
             h = QLabel(f"+{c}")
             h.setObjectName("FieldLabel")
             h.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -741,12 +761,14 @@ class MainWindow(QMainWindow):
 
         cell_font = QFont("Consolas, DejaVu Sans Mono", 9)
         self._ch_labels = []
-        for r in range(8):
-            row_lbl = QLabel(f"{r * 8}")
+        for r in range(nrows):
+            row_lbl = QLabel(f"{r * _COLS}")
             row_lbl.setObjectName("FieldLabel")
             row_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             cells.addWidget(row_lbl, r + 1, 0)
-            for c in range(8):
+            for c in range(_COLS):
+                if r * _COLS + c >= self._num_ch:
+                    break
                 lbl = QLabel("—")
                 lbl.setFont(cell_font)
                 lbl.setFixedWidth(74)
@@ -806,13 +828,13 @@ class MainWindow(QMainWindow):
         ctrl.addWidget(self._spec_board)
         ctrl.addWidget(QLabel("Channel:"))
         self._spec_channel = QSpinBox()
-        self._spec_channel.setRange(0, 63)
+        self._spec_channel.setRange(0, self._num_ch - 1)
         self._spec_channel.valueChanged.connect(self._spec_target_changed)
         ctrl.addWidget(self._spec_channel)
         ctrl.addWidget(QLabel("Source:"))
         self._spec_source = QComboBox()
-        for name in SPECTRUM_SOURCES:
-            self._spec_source.addItem(name)
+        sources = list(sources_for_family(self._family))
+        self._spec_source.addItems(sources)
         self._spec_source.currentTextChanged.connect(
             lambda t: self._spectrum_plot.set_source(t)
         )
@@ -821,6 +843,8 @@ class MainWindow(QMainWindow):
         vbox.addLayout(ctrl)
 
         self._spectrum_plot = SpectrumPlot()
+        if sources:
+            self._spectrum_plot.set_source(sources[0])
         vbox.addWidget(self._spectrum_plot, 1)
         return page
 
@@ -845,6 +869,7 @@ class MainWindow(QMainWindow):
         vbox.addLayout(ctrl)
 
         self._map2d_plot = Map2DPlot()
+        self._map2d_plot.set_num_ch(self._num_ch)
         vbox.addWidget(self._map2d_plot, 1)
         return page
 
@@ -858,8 +883,14 @@ class MainWindow(QMainWindow):
         self._hv_page_layout.setContentsMargins(20, 16, 20, 16)
         self._hv_page_layout.setSpacing(12)
 
-        self._hv_placeholder = QLabel("Connect boards to see HV and temperature status.")
+        if self._family == 5203:
+            msg = ("The A5203 is a picoTDC (timing-only) board — it has no HV bias "
+                   "generator. Temperatures are shown on the Run Statistics page.")
+        else:
+            msg = "Connect boards to see HV and temperature status."
+        self._hv_placeholder = QLabel(msg)
         self._hv_placeholder.setObjectName("FieldLabel")
+        self._hv_placeholder.setWordWrap(True)
         self._hv_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._hv_page_layout.addWidget(self._hv_placeholder)
         self._hv_page_layout.addStretch(1)
@@ -904,7 +935,7 @@ class MainWindow(QMainWindow):
 
         row1.addWidget(QLabel("Channel:"))
         self._reg_ch = QSpinBox()
-        self._reg_ch.setRange(0, 63)
+        self._reg_ch.setRange(0, self._num_ch - 1)
         self._reg_ch.setFixedWidth(70)
         self._reg_ch.valueChanged.connect(self._reg_update_addr)
         row1.addWidget(self._reg_ch)
@@ -1079,13 +1110,15 @@ class MainWindow(QMainWindow):
         Raises pydantic ValidationError / ValueError on bad input — the caller is
         expected to surface it to the user.
         """
+        bcls = board_class(self._family)
+        ccls = _CONFIG_CLASS.get(self._family, HydraConfig)
         paths = self._connect_paths()
         board_dicts = self._board_params.dicts()
-        boards: list[BoardConfig] = []
+        boards = []
         for i, path in enumerate(paths):
             d = dict(board_dicts[i]) if i < len(board_dicts) else {}
             d["Open"] = path
-            boards.append(BoardConfig(**d))   # validates
+            boards.append(bcls(**d))   # validates
 
         sections: dict = {}
         for name, form in self._section_forms.items():
@@ -1093,7 +1126,7 @@ class MainWindow(QMainWindow):
             merged = {**cur.model_dump(), **form.values()}
             sections[name] = type(cur)(**merged)  # validates
 
-        return HydraConfig(version=self._config.version, boards=boards, **sections)
+        return ccls(version=self._config.version, boards=boards, **sections)
 
     def _populate_forms(self, cfg: HydraConfig) -> None:
         """Fill every editing widget from *cfg* (forms now match config: clean)."""
@@ -1373,6 +1406,9 @@ class MainWindow(QMainWindow):
     # ================================================================ HV page
 
     def _rebuild_hv_cards(self, statuses: list[BoardStatus]) -> None:
+        # The A5203 has no HV — keep the explanatory placeholder, build no cards.
+        if self._family == 5203:
+            return
         # Remove placeholder + old cards
         self._hv_placeholder.hide()
         for card_dict in self._hv_cards:
@@ -1538,15 +1574,57 @@ class MainWindow(QMainWindow):
             return
         try:
             cfg = load_config(path)
+            new_family = int(getattr(cfg, "board_family", 5202))
             self._config = cfg
             self._config_path = Path(path)
             self._loaded_from_workspace = False
             self._update_config_chip()
-            self._refresh_board_path_rows()
-            self._populate_forms(cfg)
-            self._append_log("info", f"Loaded config: {path}")
+            if new_family != self._family:
+                # Different board family -> rebuild the family-dependent UI
+                # (settings tabs, channel grids, spectrum sources, HV page).
+                self._family = new_family
+                self._num_ch = num_channels(new_family)
+                self._rebuild_stack()
+                self._append_log(
+                    "info", f"Loaded config: {path} (board family {new_family})"
+                )
+            else:
+                self._refresh_board_path_rows()
+                self._populate_forms(cfg)
+                self._append_log("info", f"Loaded config: {path}")
         except Exception as exc:
             QMessageBox.critical(self, "Load Config", f"Failed to load config:\n{exc}")
+
+    def _rebuild_stack(self) -> None:
+        """Rebuild every stack page for the current board family and repopulate.
+
+        Used when a config of a different family is loaded: the settings tabs,
+        per-channel grids, spectrum sources, map geometry and HV page all depend
+        on the family, so the simplest correct path is to rebuild them.
+        """
+        cur = self._stack.currentIndex()
+        self._section_forms = {}
+        self._board_scope_forms = []
+        while self._stack.count():
+            w = self._stack.widget(0)
+            self._stack.removeWidget(w)
+            w.deleteLater()
+        for builder in (
+            self._build_settings_page,
+            self._build_run_statistics_page,
+            self._build_spectra_page,
+            self._build_map2d_page,
+            self._build_hv_page,
+            self._build_registers_page,
+            self._build_log_page,
+        ):
+            self._stack.addWidget(builder())
+        for form in self._section_forms.values():
+            form.changed.connect(self._mark_dirty)
+        for bsf in self._board_scope_forms:
+            bsf.changed.connect(self._mark_dirty)
+        self._populate_forms(self._config)
+        self._stack.setCurrentIndex(min(cur, self._stack.count() - 1))
 
     def _menu_save_config(self) -> None:
         default = str(self._config_path or Path.home() / "hydrafers.yaml")
