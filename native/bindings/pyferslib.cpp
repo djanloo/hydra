@@ -35,9 +35,43 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace py = pybind11;
+
+// =====================================================================
+// Board-family cache (FERSCode per handle)
+// =====================================================================
+//
+// ferslib 2.2.0 split the formerly-generic ServEvent_t into board-specific
+// ServEvent5202_t / ServEvent5203_t / ServEvent5204_t (and added 5204-specific
+// List/Counting structs). FERS_GetEvent returns a void* pointing at whichever
+// struct matches the producing board's FERSCode, but it does NOT tell the caller
+// which one — so the binding must know the board family to cast correctly.
+//
+// We look the FERSCode up via FERS_GetBoardInfo once per handle and memoize it.
+// HydraFERS systems are homogeneous (pyfers.System forbids mixing families), so a
+// single lookup of handles[0] suffices per get_event/drain_events call; the cache
+// makes even that ~free after the first hit. Accessed only with the GIL held.
+static std::unordered_map<int, uint16_t> g_fers_code_cache;
+
+static uint16_t fers_code_for_handle(int handle)
+{
+    auto it = g_fers_code_cache.find(handle);
+    if (it != g_fers_code_cache.end())
+        return it->second;
+    FERS_BoardInfo_t info;
+    std::memset(&info, 0, sizeof(info));
+    int ret;
+    {
+        py::gil_scoped_release release;
+        ret = FERS_GetBoardInfo(handle, &info);
+    }
+    uint16_t code = (ret >= 0) ? info.FERSCode : 0;
+    g_fers_code_cache[handle] = code;
+    return code;
+}
 
 // =====================================================================
 // Error handling — the one concession to Python (CONTRACT.md §1a)
@@ -247,6 +281,21 @@ struct CountingEvent {
         e.q_or_counts   = s.q_or_counts;
         return e;
     }
+
+    // 5204 has two T-OR counters (t1/t2) instead of T-OR/Q-OR. Map t1->t_or,
+    // t2->q_or so the single wrapper stays stable for consumers.
+    static CountingEvent from_5204(const CountingEvent_5204_t& s)
+    {
+        CountingEvent e;
+        e.tstamp_us     = s.tstamp_us;
+        e.rel_tstamp_us = s.rel_tstamp_us;
+        e.trigger_id    = s.trigger_id;
+        e.chmask        = s.chmask;
+        e.counts        = copy_to_ro_array<uint32_t>(s.counts, 64);
+        e.t_or_counts   = s.t1_or_counts;
+        e.q_or_counts   = s.t2_or_counts;
+        return e;
+    }
 };
 
 // ---- WaveEvent <- WaveEvent_t ---------------------------------------
@@ -288,7 +337,12 @@ struct ListEvent {
     py::array_t<uint32_t> toa;          // [nhits]  (from .tstamp)
     py::array_t<uint16_t> tot;          // [nhits]
 
-    static ListEvent from_c(const ListEvent_t& s)
+    // 5202 + 5203 share ListEvent_t, but the per-hit ToA lives in a DIFFERENT field
+    // per family: 5202 fills `tstamp[]` (labelled "5202 only" in FERSlib.h), 5203
+    // fills `ToA[]` ("other board"). Reading the wrong one yields zeros, so we select
+    // by FERSCode. (Pre-2.2.0 the binding always read `tstamp`, silently breaking
+    // 5203 timing.)
+    static ListEvent from_c(const ListEvent_t& s, uint16_t fers_code)
     {
         ListEvent e;
         e.tstamp_us   = s.tstamp_us;
@@ -300,15 +354,36 @@ struct ListEvent {
         py::ssize_t n = static_cast<py::ssize_t>(s.nhits);
         if (n > MAX_LIST_SIZE)
             n = MAX_LIST_SIZE;
+        const uint32_t* toa_src = (fers_code == 5202) ? s.tstamp : s.ToA;
         e.channel = copy_to_ro_array<uint8_t>(s.channel, n);
         e.edge    = copy_to_ro_array<uint8_t>(s.edge,    n);
-        e.toa     = copy_to_ro_array<uint32_t>(s.tstamp, n);
+        e.toa     = copy_to_ro_array<uint32_t>(toa_src,  n);
+        e.tot     = copy_to_ro_array<uint16_t>(s.ToT,    n);
+        return e;
+    }
+
+    // 5204 uses a distinct ListEvent_5204_t: ToA-only (no `tstamp`/`Tref_tstamp`),
+    // no per-hit edge. Map onto the same wrapper, leaving edge/tref empty.
+    static ListEvent from_5204(const ListEvent_5204_t& s)
+    {
+        ListEvent e;
+        e.tstamp_us   = s.tstamp_us;
+        e.tref_tstamp = 0;
+        e.tstamp_clk  = s.tstamp_clk;
+        e.trigger_id  = s.trigger_id;
+        e.nhits       = s.nhits;
+        py::ssize_t n = static_cast<py::ssize_t>(s.nhits);
+        if (n > MAX_LIST_SIZE)
+            n = MAX_LIST_SIZE;
+        e.channel = copy_to_ro_array<uint8_t>(s.channel, n);
+        e.edge    = copy_to_ro_array<uint8_t>(nullptr,   0);  // 5204 has no edge list
+        e.toa     = copy_to_ro_array<uint32_t>(s.ToA,    n);
         e.tot     = copy_to_ro_array<uint16_t>(s.ToT,    n);
         return e;
     }
 };
 
-// ---- ServEvent <- ServEvent_t ---------------------------------------
+// ---- ServEvent <- ServEvent5202_t / ServEvent5203_t / ServEvent5204_t ----
 struct ServEvent {
     double             tstamp_us;
     uint64_t           update_time;
@@ -337,16 +412,71 @@ struct ServEvent {
     uint32_t           rej_trg_cnt;
     uint32_t           suppr_trg_cnt;
 
-    static ServEvent from_c(const ServEvent_t& s)
+    // ferslib 2.2.0 replaced the generic ServEvent_t with three board-specific
+    // structs that carry DIFFERENT subsets of fields. We keep ONE stable Python
+    // wrapper (the historical superset) and populate it from whichever struct the
+    // producing board uses, leaving fields absent for that family at 0.
+
+    // A5202: has HV + Q/T-OR, no TDC temps / TDC-RO status / picoTDC trigger counters.
+    static ServEvent from_5202(const ServEvent5202_t& s)
     {
-        ServEvent e;
+        ServEvent e{};
         e.tstamp_us      = s.tstamp_us;
         e.update_time    = s.update_time;
         e.pkt_size       = s.pkt_size;
         e.version        = s.version;
         e.format         = s.format;
-        e.ch_trg_cnt     = copy_to_ro_array<uint32_t>(s.ch_trg_cnt,
-                                                      FERSLIB_MAX_NCH_5202);
+        e.ch_trg_cnt     = copy_to_ro_array<uint32_t>(s.ch_trg_cnt, FERSLIB_MAX_NCH_5202);
+        e.q_or_cnt       = s.q_or_cnt;
+        e.t_or_cnt       = s.t_or_cnt;
+        e.temp_fpga      = s.tempFPGA;
+        e.temp_board     = s.tempBoard;
+        e.temp_hv        = s.tempHV;
+        e.temp_detector  = s.tempDetector;
+        e.hv_vmon        = s.hv_Vmon;
+        e.hv_imon        = s.hv_Imon;
+        e.hv_status_on   = s.hv_status_on;
+        e.hv_status_ramp = s.hv_status_ramp;
+        e.hv_status_ovv  = s.hv_status_ovv;
+        e.hv_status_ovc  = s.hv_status_ovc;
+        e.status         = s.Status;
+        return e;
+    }
+
+    // A5203 (picoTDC): has TDC temps, TDC-RO status and picoTDC trigger counters,
+    // but NO HV, NO Q/T-OR, and NO `version` field.
+    static ServEvent from_5203(const ServEvent5203_t& s)
+    {
+        ServEvent e{};
+        e.tstamp_us      = s.tstamp_us;
+        e.update_time    = s.update_time;
+        e.pkt_size       = s.pkt_size;
+        e.format         = s.format;
+        e.ch_trg_cnt     = copy_to_ro_array<uint32_t>(s.ch_trg_cnt, FERSLIB_MAX_NCH_5202);
+        e.temp_fpga      = s.tempFPGA;
+        e.temp_board     = s.tempBoard;
+        e.temp_tdc0      = s.tempTDC[0];
+        e.temp_tdc1      = s.tempTDC[1];
+        e.status         = s.Status;
+        e.tdc_ro_status  = s.TDCROStatus;
+        e.readout_flags  = s.ReadoutFlags;
+        e.tot_trg_cnt    = s.TotTrg_cnt;
+        e.rej_trg_cnt    = s.RejTrg_cnt;
+        e.suppr_trg_cnt  = s.SupprTrg_cnt;
+        return e;
+    }
+
+    // A5204: the superset struct (HV + TDC + picoTDC counters). t1/t2-OR map onto
+    // q/t-OR for wrapper stability.
+    static ServEvent from_5204(const ServEvent5204_t& s)
+    {
+        ServEvent e{};
+        e.tstamp_us      = s.tstamp_us;
+        e.update_time    = s.update_time;
+        e.pkt_size       = s.pkt_size;
+        e.version        = s.version;
+        e.format         = s.format;
+        e.ch_trg_cnt     = copy_to_ro_array<uint32_t>(s.ch_trg_cnt, FERSLIB_MAX_NCH_5202);
         e.q_or_cnt       = s.q_or_cnt;
         e.t_or_cnt       = s.t_or_cnt;
         e.temp_fpga      = s.tempFPGA;
@@ -400,15 +530,26 @@ struct TestEvent {
 // use the full DTQ_SERVICE (0x2F) value; data events are selected by the low nibble
 // (dtq & 0xF) per CONTRACT.md §1a. Test events use DTQ_TEST (0xFF).
 //
+// `fers_code` is the producing board's FERSCode (5202/5203/5204), needed to pick the
+// correct C struct for service events (split per family in ferslib 2.2.0), the right
+// ToA field for 5202-vs-5203 timing lists, and the 5204-specific List/Counting layouts.
 // Must be called WITH the GIL held (it allocates Python objects).
-static py::object build_event(int dtq, void* event_ptr)
+static py::object build_event(int dtq, void* event_ptr, uint16_t fers_code)
 {
     if (event_ptr == nullptr)
         return py::none();
 
-    // Service event: matched on the full 0x2F qualifier first.
-    if (dtq == DTQ_SERVICE)
-        return py::cast(ServEvent::from_c(*reinterpret_cast<ServEvent_t*>(event_ptr)));
+    // Service event: matched on the full 0x2F qualifier first. Struct is per-family.
+    if (dtq == DTQ_SERVICE) {
+        if (fers_code == 5203)
+            return py::cast(ServEvent::from_5203(
+                *reinterpret_cast<ServEvent5203_t*>(event_ptr)));
+        if (fers_code == 5204)
+            return py::cast(ServEvent::from_5204(
+                *reinterpret_cast<ServEvent5204_t*>(event_ptr)));
+        return py::cast(ServEvent::from_5202(
+            *reinterpret_cast<ServEvent5202_t*>(event_ptr)));
+    }
 
     // Test event: matched on the full 0xFF qualifier.
     if (dtq == DTQ_TEST)
@@ -420,9 +561,15 @@ static py::object build_event(int dtq, void* event_ptr)
             return py::cast(SpectEvent::from_c(
                 *reinterpret_cast<SpectEvent_t*>(event_ptr)));
         case DTQ_TIMING:    // 0x02 (list)
+            if (fers_code == 5204)
+                return py::cast(ListEvent::from_5204(
+                    *reinterpret_cast<ListEvent_5204_t*>(event_ptr)));
             return py::cast(ListEvent::from_c(
-                *reinterpret_cast<ListEvent_t*>(event_ptr)));
+                *reinterpret_cast<ListEvent_t*>(event_ptr), fers_code));
         case DTQ_COUNT:     // 0x04 (MCS)
+            if (fers_code == 5204)
+                return py::cast(CountingEvent::from_5204(
+                    *reinterpret_cast<CountingEvent_5204_t*>(event_ptr)));
             return py::cast(CountingEvent::from_c(
                 *reinterpret_cast<CountingEvent_t*>(event_ptr)));
         case DTQ_WAVE:      // 0x08 (waveform)
@@ -610,7 +757,10 @@ static void configure(int handle, int mode)
 
 // ---- tdl ------------------------------------------------------------
 
-static void init_tdl_chains(
+// ferslib 2.0.0 split TDL init into FERS_EnumTDLchains (chain enumeration, fills the
+// DelayAdjust matrix) and FERS_SyncTDLchains (timing synchronization). The legacy
+// FERS_InitTDLchains no longer exists.
+static void enum_tdl_chains(
     int handle,
     py::array_t<float, py::array::c_style | py::array::forcecast> delay_adjust)
 {
@@ -626,17 +776,30 @@ static void init_tdl_chains(
     int ret;
     {
         py::gil_scoped_release release;
-        ret = FERS_InitTDLchains(handle, data);
+        ret = FERS_EnumTDLchains(handle, data);
     }
     check_ret(ret);
 }
 
-static bool tdl_chains_initialized(int handle)
+// FERS_SyncTDLchains(int* cnchandle, uint32_t StartRunMode) — synchronize timing
+// across a list of concentrator handles using the given start-run mode.
+static void sync_tdl_chains(const std::vector<int>& cnc_handles, uint32_t start_mode)
+{
+    std::vector<int> hv = cnc_handles;  // mutable, contiguous int* for ferslib
+    int ret;
+    {
+        py::gil_scoped_release release;
+        ret = FERS_SyncTDLchains(hv.data(), start_mode);
+    }
+    check_ret(ret);
+}
+
+static bool tdl_chains_initialized(int cnc_handle)
 {
     bool ret;
     {
         py::gil_scoped_release release;
-        ret = FERS_TDLchainsInitialized(handle);
+        ret = FERS_TDLchainsInitialized(cnc_handle);
     }
     return ret;
 }
@@ -734,7 +897,9 @@ static py::object get_event(const std::vector<int>& handles)
     if (nb == 0)
         return py::none();
 
-    py::object event = build_event(dtq, event_ptr);
+    // Homogeneous system: the family of any open board is the family of all of them.
+    uint16_t fers_code = hv.empty() ? 0 : fers_code_for_handle(hv[0]);
+    py::object event = build_event(dtq, event_ptr, fers_code);
     return py::make_tuple(bindex, dtq, event);
 }
 
@@ -751,6 +916,8 @@ static py::list drain_events(const std::vector<int>& handles, int max_events)
 {
     std::vector<int> hv = handles;
     py::list out;
+    // Resolve the (homogeneous) board family once for the whole batch.
+    const uint16_t fers_code = hv.empty() ? 0 : fers_code_for_handle(hv[0]);
 
     for (int i = 0; i < max_events; ++i) {
         int bindex = -1;
@@ -775,7 +942,7 @@ static py::list drain_events(const std::vector<int>& handles, int max_events)
         if (nb == 0)
             break;  // queue drained
 
-        py::object event = build_event(dtq, event_ptr);
+        py::object event = build_event(dtq, event_ptr, fers_code);
         out.append(py::make_tuple(bindex, dtq, event));
     }
     return out;
@@ -1080,7 +1247,10 @@ PYBIND11_MODULE(pyferslib, m)
         .def_readonly("tot",         &ListEvent::tot);
 
     py::class_<ServEvent>(m, "ServEvent",
-                          "Service event (mirrors ServEvent_t). ch_trg_cnt is a copy.")
+                          "Service event. Unified wrapper populated from the per-family "
+                          "ServEvent5202_t / ServEvent5203_t / ServEvent5204_t struct that "
+                          "matches the producing board; fields absent for that family read "
+                          "as 0. ch_trg_cnt is a copy.")
         .def_readonly("tstamp_us",      &ServEvent::tstamp_us)
         .def_readonly("update_time",    &ServEvent::update_time)
         .def_readonly("pkt_size",       &ServEvent::pkt_size)
@@ -1193,9 +1363,12 @@ PYBIND11_MODULE(pyferslib, m)
           "FERS_configure — apply parameters to the board (CFG_HARD / CFG_SOFT).");
 
     // ----- Functions: tdl -----
-    m.def("init_tdl_chains", &init_tdl_chains, py::arg("handle"), py::arg("delay_adjust"),
-          "FERS_InitTDLchains — delay_adjust is a float ndarray of shape [8, 16].");
-    m.def("tdl_chains_initialized", &tdl_chains_initialized, py::arg("handle"),
+    m.def("enum_tdl_chains", &enum_tdl_chains, py::arg("handle"), py::arg("delay_adjust"),
+          "FERS_EnumTDLchains — enumerate TDL chains; delay_adjust is a float ndarray "
+          "of shape [8, 16] (FERSLIB_MAX_NTDL x FERSLIB_MAX_NNODES).");
+    m.def("sync_tdl_chains", &sync_tdl_chains, py::arg("cnc_handles"), py::arg("start_mode"),
+          "FERS_SyncTDLchains — synchronize TDL chain timing across concentrator handles.");
+    m.def("tdl_chains_initialized", &tdl_chains_initialized, py::arg("cnc_handle"),
           "FERS_TDLchainsInitialized.");
 
     // ----- Functions: readout -----

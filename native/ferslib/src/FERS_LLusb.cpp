@@ -22,21 +22,15 @@ int8_t usbIdx[FERSLIB_MAX_NBRD] = {};
 //static mutex_t USBStream_Mutex = NULL;
 
 #define TIMEOUT  1000
+#define USB_STREAM_REENABLE_RETRIES 1
 
 #ifdef WIN32
 
-// //Modify this value to match the VID and PID in your USB device descriptor.
-// //Use the formatting: "Vid_xxxx&Pid_xxxx" where xxxx is a 16-bit hexadecimal number.
-// #define MY_DEVICE_ID  L"Vid_04d8&Pid_0053"		   //Change this number (along with the corresponding VID/PID in the
-// 												   //microcontroller firmware, and in the driver installation .INF
-// 												   //file) before moving the design into production.
-#ifdef UNICODE
-    #define MY_DEVICE_ID L"Vid_04d8&Pid_0053"
-#else
-    #define MY_DEVICE_ID "Vid_04d8&Pid_0053"
-#endif
-
-
+//Modify this value to match the VID and PID in your USB device descriptor.
+//Use the formatting: "Vid_xxxx&Pid_xxxx" where xxxx is a 16-bit hexadecimal number.
+#define MY_DEVICE_ID  L"Vid_04d8&Pid_0053"		   //Change this number (along with the corresponding VID/PID in the
+												   //microcontroller firmware, and in the driver installation .INF
+												   //file) before moving the design into production.
 
 
 BOOL	USBDEV::CheckIfPresentAndGetUSBDevicePath(DWORD InterfaceIndex) {
@@ -57,11 +51,7 @@ BOOL	USBDEV::CheckIfPresentAndGetUSBDevicePath(DWORD InterfaceIndex) {
 	DWORD ErrorStatus;
 	DWORD LoopCounter = 0;
 
-	#ifdef UNICODE
 	wstring DeviceIDToFind = MY_DEVICE_ID;
-	#else
-	string DeviceIDToFind = MY_DEVICE_ID;
-	#endif
 
 	//First populate a list of plugged in devices (by specifying "DIGCF_PRESENT"), which are of the specified class GUID.
 	DeviceInfoTable = SetupDiGetClassDevs(&InterfaceClassGuid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
@@ -111,9 +101,9 @@ BOOL	USBDEV::CheckIfPresentAndGetUSBDevicePath(DWORD InterfaceIndex) {
 
 		//Now check if the first string in the hardware ID matches the device ID of my USB device.
 #ifdef UNICODE
-wstring* DeviceIDFromRegistry = new wstring((wchar_t*)PropertyValueBuffer);
+		wstring* DeviceIDFromRegistry = new wstring((wchar_t*)PropertyValueBuffer);
 #else
-string* DeviceIDFromRegistry = new string((char*)PropertyValueBuffer);
+		string DeviceIDFromRegistry = new string((char*)PropertyValueBuffer);
 #endif
 
 		free(PropertyValueBuffer);		//No longer need the PropertyValueBuffer, free the memory to prevent potential memory leaks
@@ -184,7 +174,7 @@ int USBDEV::open_connection(int index) {
 				WinUsb_SetPipePolicy(MyWinUSBInterfaceHandle, 0x81, PIPE_TRANSFER_TIMEOUT, sizeof(ULONG), &timeout);
 				WinUsb_SetPipePolicy(MyWinUSBInterfaceHandle, 0x82, PIPE_TRANSFER_TIMEOUT, sizeof(ULONG), &timeout);
 				if (ENABLE_FERSLIB_LOGMSG) {
-					FERS_LibMsg((char*)"[ERROR] Device not found on USB\n");
+					FERS_LibMsg((char*)"[INFO] Device found on USB\n");
 				}			
 			}		
 		}
@@ -364,7 +354,7 @@ int USBDEV::write_reg(uint32_t address, uint32_t data)
 	if (wasStreaming)
 	{
 		//stream_enable2(true);
-		for (int i = 0; i < 10; i++) {
+		for (int i = 0; i < USB_STREAM_REENABLE_RETRIES; i++) {
 			stream_enable2(true);
 		}
 	}
@@ -402,7 +392,7 @@ int USBDEV::read_reg(uint32_t address, uint32_t* data)
 	// Riabilita lo stream se era attivo
 	if (wasStreaming)
 	{
-		for (int i = 0; i < 10; i++) {
+		for (int i = 0; i < USB_STREAM_REENABLE_RETRIES; i++) {
 			stream_enable2(true);
 		}
 		//stream_enable2(true);
@@ -950,6 +940,7 @@ static f_sem_t RxSemaphore[FERSLIB_MAX_NBRD];			// Semaphore for sync the data r
 static f_thread_t ThreadID[FERSLIB_MAX_NBRD];			// RX Thread ID
 static mutex_t RxMutex[FERSLIB_MAX_NBRD];				// Mutex for the access to the Rx data buffer and pointers
 static FILE* Dump[FERSLIB_MAX_NBRD] = { NULL };			// low level data dump files (for debug)
+static FILE* Dump2[FERSLIB_MAX_NCNC] = { NULL };		// low level data dump files (for debug)
 static FILE* RawData[FERSLIB_MAX_NBRD] = { NULL };		// Raw Data output file, used for further reprocessing
 static uint8_t ReadData_Init[FERSLIB_MAX_NBRD] = { 0 }; // Re-init read pointers after run stop
 static int subrun[FERSLIB_MAX_NBRD] = { 0 };			// Sub Run index
@@ -978,6 +969,26 @@ static int FERS_DebugDump(int bindex, const char* fmt, ...) {
 	va_end(args);
 	if (Dump[bindex] != NULL)
 		fprintf(Dump[bindex], "%s", msg);
+	return 0;
+}
+
+
+static int FERS_DebugDump2(int cindex, const char* fmt, ...) {
+	char msg[1000], filename[200];
+	static int fileopened[FERSLIB_MAX_NCNC] = { 0 }; // Negative Logic. Arrays can be initialized at 0
+	va_list args;
+	if (cindex >= FERSLIB_MAX_NCNC) return -1;
+	if (!fileopened[cindex]) {
+		sprintf(filename, "ll_Readlog_%d.txt", cindex);
+		Dump2[cindex] = fopen(filename, "w");
+		fileopened[cindex] = 1;
+	}
+
+	va_start(args, fmt);
+	vsprintf(msg, fmt, args);
+	va_end(args);
+	if (Dump2[cindex] != NULL)
+		fprintf(Dump2[cindex], "%s", msg);
 	return 0;
 }
 
@@ -1134,10 +1145,15 @@ static void* usb_data_receiver(void* params) {
 						FERS_usb[usbIdx[bindex]].stream_enable(true);
 						stream = 1;
 					}
-					FERS_usb[usbIdx[bindex]].reset_leftover_data();
 					ret = FERS_usb[usbIdx[bindex]].read_pipe(RxBuff[bindex][0], USB_BLK_SIZE, &nbrx);
-					if (nbrx == 0 && ret == 0) empty = 1;
-					if (!empty && (DebugLogs & DBLOG_LL_MSGDUMP)) FERS_DebugDump(bindex, "Reading old data...\n");
+					FERS_DebugDump(bindex, "Reading old data, ret=%d, nbrx=%d...\n", ret, nbrx);
+					if (nbrx == 0 && ret == 0) {
+						empty = 1;
+						FERS_usb[usbIdx[bindex]].reset_leftover_data();
+					}
+					//if (!empty && (DebugLogs & DBLOG_LL_MSGDUMP)) {
+					//	FERS_DebugDump(bindex, "Reading old data, ret=%d...\n", ret);
+					//}
 					if (stream == 1) {
 						FERS_usb[usbIdx[bindex]].stream_enable(false);
 						stream = 0;
@@ -1310,6 +1326,13 @@ int LLusb_ReadData(int bindex, char* buff, int maxsize, int* nb) {
 	if (*nb > 0) {
 		memcpy(buff, rpnt, *nb);
 		RxBuff_rp[bindex] += *nb;
+		if (DebugLogs & DBLOG_LL_READDUMP) {
+			for (int i = 0; i < *nb; i += 4) {
+				uint32_t* d32 = (uint32_t*)(buff + i);
+				FERS_DebugDump2(bindex, "%08X\n", *d32);
+				fflush(Dump2[bindex]);
+			}
+		}
 	}
 	if (RxBuff_rp[bindex] == Nbr[bindex]) {  // end of current buff reached => switch to other buffer 
 		RxB_Nbytes[bindex][RxB_r[bindex]] = 0;
@@ -1325,7 +1348,7 @@ int LLusb_ReadData(int bindex, char* buff, int maxsize, int* nb) {
 int LLusb_ReadData_File(int bindex, char* buff, int maxsize, int* nb, int flushing) {
 	//uint8_t stop_loop = 1;
 	static int tmp_srun[FERSLIB_MAX_NBRD] = { 0 };
-	static int fsizeraw[FERSLIB_MAX_NBRD] = { 0 };
+	static int64_t fsizeraw[FERSLIB_MAX_NBRD] = { 0 };
 	static FILE* ReadRawData[FERSLIB_MAX_NBRD] = { NULL };
 	int fret = 0;
 	if (flushing) {
@@ -1347,9 +1370,9 @@ int LLusb_ReadData_File(int bindex, char* buff, int maxsize, int* nb, int flushi
 			tmp_srun[bindex] = 0;
 			return 4;
 		}
-		fseek(ReadRawData[bindex], 0, SEEK_END);	// Get the file size
-		fsizeraw[bindex] = ftell(ReadRawData[bindex]);
-		fseek(ReadRawData[bindex], 0, SEEK_SET);
+		f_fseek(ReadRawData[bindex], 0, SEEK_END);	// Get the file size
+		fsizeraw[bindex] = f_ftell(ReadRawData[bindex]);
+		f_fseek(ReadRawData[bindex], 0, SEEK_SET);
 
 		// Here the file has the correct format. For both files with FERSlib name format
 		// and custom one, the header have to be search when tmp_srun is 0
@@ -1357,17 +1380,17 @@ int LLusb_ReadData_File(int bindex, char* buff, int maxsize, int* nb, int flushi
 			// Read Header keyword
 			char file_header[50];
 			fret = fread(&file_header, 32, 1, ReadRawData[bindex]);
-			if (strcmp(file_header, "$$$$$$$FERSRAWDATAHEADER$$$$$$$") != 0) { // No header mark found
+			if ((strcmp(file_header, "$$$$$$$FERSRAWDATAHEADER$$$$$$$") != 0) && (strcmp(file_header, "$$$$$$FERSRAWDATAHEADERv2$$$$$$") != 0)) {
 				if (ENABLE_FERSLIB_LOGMSG) FERS_LibMsg((char*)"[ERROR][BRD %02d] No valid header found in Raw Data filename %s\n", bindex, filename);
-				_setLastLocalError("ERROR: No valid keyword header found");
+				_setLastLocalError("No valid keyword header found in Raw Data filename %s\n", filename);
 				fclose(ReadRawData[bindex]);
 				return FERSLIB_ERR_GENERIC;
 			}
 			size_t jump_size_header = 0;
 			fret = fread(&jump_size_header, sizeof(jump_size_header), 1, ReadRawData[bindex]);
-			fseek(ReadRawData[bindex], (long)jump_size_header, SEEK_CUR);
+			f_fseek(ReadRawData[bindex], (long)jump_size_header, SEEK_CUR);
 
-			fsizeraw[bindex] -= ftell(ReadRawData[bindex]);
+			fsizeraw[bindex] -= f_ftell(ReadRawData[bindex]);
 		}
 	}
 
@@ -1412,18 +1435,36 @@ int LLusb_OpenRawOutputFile(int handle) {
 		FERS_GetBoardInfo(handle, &tmpInfo);
 		sprintf(filename, "%s.%d.frd", RawDataFilename[bidx], subrun[bidx]);
 		RawData[bidx] = fopen(filename, "wb");
-		size_t header_size = sizeof(size_t) + sizeof(handle) + sizeof(tmpInfo);
-		if (FERS_IsXROC(handle)) header_size += sizeof(PedestalLG[bidx]) + sizeof(PedestalHG[bidx]);
+		size_t header_size =   // sizeof(size_t) + sizeof(handle) + sizeof(tmpInfo);
+			sizeof(size_t) +
+			sizeof(int8_t) * 5 + // Library and RawData version
+			sizeof(int) +
+			sizeof(tmpInfo) +
+			(FERS_IsXROC(handle) ? sizeof(PedestalLG[bidx]) + sizeof(PedestalHG[bidx]) : 0);
 
-		char title[32] = "$$$$$$$FERSRAWDATAHEADER$$$$$$$";
+		char title[32] = "$$$$$$FERSRAWDATAHEADERv2$$$$$$";
 		fwrite(&title, sizeof(title), 1, RawData[bidx]);
 		fwrite(&header_size, sizeof(header_size), 1, RawData[bidx]);
+
+		// Library version
+		int8_t my_tmp_version = FERSLIB_VERSION_MAJOR;
+		fwrite(&my_tmp_version, sizeof(my_tmp_version), 1, RawData[bidx]);
+		my_tmp_version = FERSLIB_VERSION_MINOR;
+		fwrite(&my_tmp_version, sizeof(my_tmp_version), 1, RawData[bidx]);
+		my_tmp_version = FERSLIB_VERSION_PATCH;
+		fwrite(&my_tmp_version, sizeof(my_tmp_version), 1, RawData[bidx]);
+		// RawData version
+		my_tmp_version = FERSLIB_RAWDATA_VERSION_MAJOR;
+		fwrite(&my_tmp_version, sizeof(my_tmp_version), 1, RawData[bidx]);
+		my_tmp_version = FERSLIB_RAWDATA_VERSION_MINOR;
+		fwrite(&my_tmp_version, sizeof(my_tmp_version), 1, RawData[bidx]);
+	
 		fwrite(&handle, sizeof(handle), 1, RawData[bidx]);
 		fwrite(&tmpInfo, sizeof(tmpInfo), 1, RawData[bidx]);
 
 		if (FERS_IsXROC(handle)) {
 			fwrite(&PedestalLG[bidx], sizeof(PedestalLG[bidx]), 1, RawData[bidx]);
-			fwrite(&PedestalHG[bidx], sizeof(PedestalHG[bidx]), 1, RawData[bidx]);
+			fwrite(&PedestalHG[bidx], sizeof(PedestalHG[bidx]), 1, RawData[bidx]); 
 		}
 	}
 	return 0;
@@ -1459,6 +1500,9 @@ int LLusb_CloseRawOutputFile(int handle) {
 // Return:		0=OK, negative number = error code
 // --------------------------------------------------------------------------------------------------------- 
 int LLusb_OpenDevice(int PID, int bindex) {
+
+	if (FERS_Offline)
+		return 0;
 	int ret, started, i;
 	f_thread_t threadID;
 	static int OpenAllDevices = 1, Ndev = 0;
@@ -1518,14 +1562,14 @@ int LLusb_OpenDevice(int PID, int bindex) {
 
 	QuitThread[bindex] = 0;
 	//FERS_usb[bindex].stream_enable(true);
-	thread_create(usb_data_receiver, &bindex, &threadID);
+	thread_create(usb_data_receiver, &bindex, &ThreadID[bindex]);
 	started = 0;
 	while (!started) {
 		f_sem_wait(&RxSemaphore[bindex], INFINITE);
 		started = 1;
 	}
-	//ret = LLusb_WriteRegister(bindex, a_commands, CMD_ACQ_STOP);	// stop acquisition (in case it was still running)
-	//ret |= LLusb_WriteRegister(bindex, a_commands, CMD_CLEAR);		// clear data in the FPGA FIFOs
+	ret = LLusb_WriteRegister(bindex, a_commands, CMD_ACQ_STOP);	// stop acquisition (in case it was still running)
+	ret |= LLusb_WriteRegister(bindex, a_commands, CMD_CLEAR);		// clear data in the FPGA FIFOs
 
 	f_sem_destroy(&RxSemaphore[bindex]);
 
@@ -1542,6 +1586,10 @@ int LLusb_CloseDevice(int bindex) {
 	lock(RxMutex[bindex]);
 	QuitThread[bindex] = 1;
 	unlock(RxMutex[bindex]);
+
+	// Wait for the thread to stop (with timeout)
+	thread_join(ThreadID[bindex], NULL);
+
 	for (int i = 0; i < 100; i++) {
 		if (RxStatus[bindex] == RXSTATUS_OFF) break;
 		Sleep(1);
@@ -1577,6 +1625,12 @@ int LLusb_StreamEnable(int bindex, bool Enable) {
 // Return:		0=OK, negative number = error code
 // --------------------------------------------------------------------------------------------------------- 
 int LLusb_Reset_IPaddress(int bindex) {
-	return(FERS_usb[usbIdx[bindex]].set_service_reg(1, 0));
+	int mret = FERS_usb[usbIdx[bindex]].set_service_reg(1, 0);
+	if (FERS_usb[usbIdx[bindex]].set_service_reg(1, 0) != 0) {
+		FERS_LibMsg((char*)"[ERROR][BRD %02d] Reset IP address failed\n", bindex);
+	} else {
+		FERS_LibMsg((char*)"[INFO][BRD %02d] Reset IP address completed\n", bindex);
+	}
+	return mret;
 }
 

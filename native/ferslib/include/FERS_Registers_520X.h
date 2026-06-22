@@ -150,6 +150,9 @@
 // *****************************************************************
 #define a_tlogic_mask_0    0x01000140	//!< Trigger FPGA-Tlogic mask (in A5202 it corresponds to a_tdiscr_mask_0)
 #define a_tlogic_mask_1    0x01000144	//!< Trigger FPGA-Tlogic mask (in A5202 it corresponds to a_tdiscr_mask_1)
+#define a_fpga_temp_5204   0x01000450	//!< FPGA die Temperature
+#define a_board_temp_5204  0x01000454	//!< Board temperature near PIC/FPGA 
+#define a_tdc_temp_5204    0x01000458	//!< Board temperature near TDC0
 
 /*! @} */
 
@@ -241,10 +244,10 @@
 #define TEST_PULSE_PREAMP_HG 			2
 #define TEST_PULSE_PREAMP_BOTH			3
 
-#define TEST_PULSE_DEST_ALL 			1
-#define TEST_PULSE_DEST_EVEN			2
-#define TEST_PULSE_DEST_ODD				3
-#define TEST_PULSE_DEST_NONE			4
+#define TEST_PULSE_DEST_ALL 			-1
+#define TEST_PULSE_DEST_EVEN			-2
+#define TEST_PULSE_DEST_ODD				-3
+#define TEST_PULSE_DEST_NONE			-4
 
 #define DPROBE_OFF						0
 #define DPROBE_PEAK_LG					1
@@ -266,9 +269,6 @@
 
 #define FAST_SHAPER_INPUT_HGPA			0
 #define FAST_SHAPER_INPUT_LGPA			1
-
-
-
 
 // ############################################################################################
 // RADIOROC REGISTERS

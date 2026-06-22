@@ -13,6 +13,7 @@
 * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. The user relies on the
 * software, documentation and results solely at his own risk.
 ******************************************************************************/
+//AGGIUNGERE A_LIST_SIZE COME PARAMETRO DA SETTARE SULLA SET E GET
 
 #include "FERS_MultiPlatform.h"
 
@@ -146,8 +147,18 @@ int Configure5202(int handle, int mode) {
 			ret |= FERS_WriteRegister(handle, a_t1_out_mask, 1);  // set T1-OUT = T1-IN
 		}
 		//if (FERScfg->T0_outMask != (1 << 4)) Con_printf("LCSw", "WARNING: T1-OUT setting has been overwritten for Start daisy chaining\n");
-	} else if (FERScfg[brd]->StartRunMode == STARTRUN_TDL) {
+	} else if (FERScfg[brd]->StartRunMode == STARTRUN_TDL ||
+		FERScfg[brd]->StartRunMode == STARTRUN_TDL_EXTRUN ||
+		FERScfg[brd]->StartRunMode == STARTRUN_TDL_GPS) {
 		ret |= FERS_WriteRegister(handle, a_run_mask, 0x01);
+		//if (FERS_CONNECTIONTYPE(handle) == FERS_CONNECTIONTYPE_TDL) {
+		//	if ((FERScfg[brd]->StartRunMode == STARTRUN_TDL_GPS))
+		//		ret |= FERS_WriteRegister(FERS_CNC_HANDLE(handle), VR_IO_PPS_SOURCE, FERScfg[brd]->GPSPPSSource); // Set PPS source if GPS start is selected
+		//	else
+		//		ret |= FERS_WriteRegister(FERS_CNC_HANDLE(handle), VR_IO_PPS_SOURCE, VR_PPS_DISABLE); // Set PPS source if GPS start is selected
+		//} else {
+		//	FERS_LibMsg("[WARNING] Cannot set GPS PPS source: TDL connection not established\n");
+		//}		}
 	}
 
 	// Set Tref mask
@@ -191,8 +202,8 @@ int Configure5202(int handle, int mode) {
 	ret |= ConfigureProbe5202(handle);
 	// Set Digital Probe in concentrator (if present)
 	if (FERS_CONNECTIONTYPE(handle) == FERS_CONNECTIONTYPE_TDL) {
-		if (FERScfg[brd]->CncProbe_A >= 0) ret |= FERS_WriteRegister(FERS_CNC_HANDLE(handle), VR_IO_FA_FN, VR_IO_FUNCTION_ZERO);  // Set FA function = ZERO
-		if (FERScfg[brd]->CncProbe_B >= 0) ret |= FERS_WriteRegister(FERS_CNC_HANDLE(handle), VR_IO_FB_FN, VR_IO_FUNCTION_ZERO);  // Set FB function = ZERO
+		if (FERScfg[brd]->CncProbe_A > 0) ret |= FERS_WriteRegister(FERS_CNC_HANDLE(handle), VR_IO_FA_FN, VR_IO_FUNCTION_ZERO);  // Set FA function = ZERO
+		if (FERScfg[brd]->CncProbe_B > 0) ret |= FERS_WriteRegister(FERS_CNC_HANDLE(handle), VR_IO_FB_FN, VR_IO_FUNCTION_ZERO);  // Set FB function = ZERO
 		ret |= FERS_WriteRegister(FERS_CNC_HANDLE(handle), VR_IO_DEBUG, FERScfg[brd]->CncProbe_A | (FERScfg[brd]->CncProbe_B << 8));
 	}
 
@@ -356,6 +367,7 @@ int Configure5202(int handle, int mode) {
 	return 0;
 
 abortcfg:
+	_setLastLocalError("Error brd%d at: %s. Exit Code = %d\n", FERS_INDEX(handle), CfgStep, ret);
 	//sprintf(ErrorMsg, "Error at: %s. Exit Code = %d\n", CfgStep, ret);
 	return ret;
 }

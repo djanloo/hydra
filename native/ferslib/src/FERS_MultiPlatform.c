@@ -1,230 +1,246 @@
 /******************************************************************************
- *
- * CAEN SpA - Front End Division
- * Via Vetraia, 11 - 55049 - Viareggio ITALY
- * +390594388398 - www.caen.it
- *
- ***************************************************************************/
-/**
- * \note TERMS OF USE:
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License as published by the Free Software
- * Foundation. This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. The user relies on the
- * software, documentation and results solely at his own risk.
- ******************************************************************************/
+* 
+* CAEN SpA - Front End Division
+* Via Vetraia, 11 - 55049 - Viareggio ITALY
+* +390594388398 - www.caen.it
+*
+***************************************************************************//**
+* \note TERMS OF USE:
+* This program is free software; you can redistribute it and/or modify it under
+* the terms of the GNU General Public License as published by the Free Software
+* Foundation. This program is distributed in the hope that it will be useful, 
+* but WITHOUT ANY WARRANTY; without even the implied warranty of 
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. The user relies on the 
+* software, documentation and results solely at his own risk.
+******************************************************************************/
 
 #include "FERS_MultiPlatform.h"
-#include "FERSlib.h" /* FERSLIB_SUCCESS, FERSLIB_ERR_GENERIC */
+#include "FERSlib.h"
+#include "time.h"
+#include <stdint.h>
+//#include <CAENThread.h>
+//#include <CAENSocket.h>
 
-/* =========================================================================
- * Internal helpers (POSIX only)
- * ========================================================================= */
-#ifdef FERS_OS_POSIX
-/**
- * Build a struct timespec representing (now + ms milliseconds) from the
- * CLOCK_REALTIME clock. Used by f_sem_wait().
- */
-static struct timespec _timespec_from_now_ms(uint32_t ms)
+#ifdef _WIN32
+#include <Windows.h>
+
+// --------------------------------------------------------------------------------------------------------- 
+// Description: get time from the computer
+// Return:		time in ms
+// --------------------------------------------------------------------------------------------------------- 
+
+uint64_t get_time()
 {
-	struct timespec ts;
-	clock_gettime(CLOCK_REALTIME, &ts);
-
-	ts.tv_sec += (time_t)(ms / 1000u);
-	ts.tv_nsec += (long)((ms % 1000u) * 1000000L);
-
-	/* Carry nanoseconds overflow into seconds */
-	ts.tv_sec += ts.tv_nsec / 1000000000L;
-	ts.tv_nsec = ts.tv_nsec % 1000000000L;
-
-	return ts;
-}
-#endif /* FERS_OS_POSIX */
-
-/* =========================================================================
- * get_time()
- *   Returns wall-clock time in milliseconds since the Unix epoch.
- *   Both branches produce the same semantic result.
- * ========================================================================= */
-uint64_t get_time(void)
-{
-#ifdef FERS_OS_WINDOWS
-	struct _timeb tb;
-	_ftime_s(&tb); /* _ftime_s is the secure variant (VS 2005+) */
-	return (uint64_t)tb.time * 1000u + (uint64_t)tb.millitm;
-
-#else /* FERS_OS_POSIX */
-	struct timeval tv;
-	gettimeofday(&tv, NULL);
-	return (uint64_t)tv.tv_sec * 1000u + (uint64_t)tv.tv_usec / 1000u;
-#endif
+	uint64_t time_ms;   // long
+	struct _timeb timebuffer;
+	_ftime( &timebuffer );
+	time_ms = (uint64_t)timebuffer.time * 1000 + (uint64_t)timebuffer.millitm;
+	return time_ms;
 }
 
-/* =========================================================================
- * GetFileUpdateTime()
- *   Returns the last-modification time of a file as a Unix timestamp
- *   (seconds since 1970-01-01 00:00:00 UTC) on all platforms.
- *
- *   NOTE: the original Windows implementation computed a non-standard
- *   timestamp from local-time fields; this version always returns a proper
- *   Unix timestamp so results are comparable across platforms.
- * ========================================================================= */
-int GetFileUpdateTime(const char *fname, uint64_t *ftime)
+
+// --------------------------------------------------------------------------------------------------------- 
+// Description: get write time of a file 
+// Return:		0: OK, -1: error
+// --------------------------------------------------------------------------------------------------------- 
+int GetFileUpdateTime(char *fname, uint64_t *ftime)
 {
-	if (fname == NULL || ftime == NULL)
-		return -1;
+    FILETIME ftCreate, ftAccess, ftWrite;
+    SYSTEMTIME stUTC, stLocal;
+    HANDLE hFile;
+
+	wchar_t wtext[200];
+	mbstowcs(wtext, fname, strlen(fname)+1);//Plus null
+	LPWSTR ptr = wtext;
 
 	*ftime = 0;
+    hFile = CreateFile(ptr, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);   // DNIN THIS CREATE A CRASH - "A Geap has been corrupted
+    if(hFile == INVALID_HANDLE_VALUE) 
+        return -1;
 
-#ifdef FERS_OS_WINDOWS
-	/* Convert the file path to UTF-16 for the Win32 API */
-	wchar_t wpath[MAX_PATH];
-	if (MultiByteToWideChar(CP_ACP, 0, fname, -1, wpath, MAX_PATH) == 0)
-		return -1;
+    // Retrieve the file times for the file.
+    if (!GetFileTime(hFile, &ftCreate, &ftAccess, &ftWrite))
+        return -1;
 
-	HANDLE hFile = CreateFileW(
-		wpath, GENERIC_READ, FILE_SHARE_READ,
-		NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	if (hFile == INVALID_HANDLE_VALUE)
-		return -1;
+    // Convert the last-write time to local time.
+    FileTimeToSystemTime(&ftWrite, &stUTC);
+    SystemTimeToTzSpecificLocalTime(NULL, &stUTC, &stLocal);
+	CloseHandle(hFile);    
 
-	FILETIME ftWrite;
-	if (!GetFileTime(hFile, NULL, NULL, &ftWrite))
-	{
-		CloseHandle(hFile);
-		return -1;
-	}
-	CloseHandle(hFile);
+	//Con_printf("C", "Y=%d M=%d D=%d - H=%d, min=%d, sec=%d\n", stLocal.wYear, stLocal.wMonth, stLocal.wDay, stLocal.wHour, stLocal.wMinute, stLocal.wSecond);
+	*ftime = 366*31*24*3600*(uint64_t)stLocal.wYear   + 
+	 	         31*24*3600*(uint64_t)stLocal.wMonth  + 
+	 			    24*3600*(uint64_t)stLocal.wDay    + 
+	 			       3600*(uint64_t)stLocal.wHour   + 
+	 				     60*(uint64_t)stLocal.wMinute + 
+						    (uint64_t)stLocal.wSecond;
 
-	/*
-	 * FILETIME counts 100-nanosecond intervals since 1601-01-01 00:00:00 UTC.
-	 * Unix epoch starts at 1970-01-01 00:00:00 UTC.
-	 * Difference: 11644473600 seconds.
-	 */
-	ULONGLONG ft100ns = ((ULONGLONG)ftWrite.dwHighDateTime << 32) |
-						(ULONGLONG)ftWrite.dwLowDateTime;
-	*ftime = (uint64_t)(ft100ns / 10000000ULL) - 11644473600ULL;
-
-#else /* FERS_OS_POSIX */
-	struct stat st;
-	if (stat(fname, &st) != 0)
-		return -1;
-	*ftime = (uint64_t)st.st_mtime;
-#endif
-
-	return 0;
+    return 0;
 }
 
-/* =========================================================================
- * Semaphore functions
- * ========================================================================= */
 
-int f_sem_init(f_sem_t *s)
-{
-	if (s == NULL)
-		return FERSLIB_ERR_GENERIC;
-
-#ifdef FERS_OS_WINDOWS
-	HANDLE h = CreateSemaphoreA(NULL, 0, LONG_MAX, NULL);
-	if (h == NULL)
-		return FERSLIB_ERR_GENERIC;
-	*s = h;
 #else
-	if (sem_init(s, /*pshared=*/0, /*value=*/0) != 0)
-		return FERSLIB_ERR_GENERIC;
-#endif
 
-	return FERSLIB_SUCCESS;
+// --------------------------------------------------------------------------------------------------------- 
+// Description: get time from the computer
+// Return:		time in ms
+// --------------------------------------------------------------------------------------------------------- 
+uint64_t get_time()
+{
+    uint64_t time_ms;
+    struct timeval t1;
+//    struct timezone tz;
+    gettimeofday(&t1, NULL);
+    time_ms = (uint64_t)(t1.tv_sec) * 1000 + (uint64_t)(t1.tv_usec) / 1000;
+    return time_ms;
 }
 
-/* ------------------------------------------------------------------------- */
 
-int f_sem_destroy(f_sem_t *s)
+// --------------------------------------------------------------------------------------------------------- 
+// Description: get write time of a file 
+// Return:		0: OK, -1: error
+// --------------------------------------------------------------------------------------------------------- 
+int GetFileUpdateTime(char *fname, uint64_t *ftime)
 {
+	struct stat t_stat;
+
+	*ftime = 0;
+    stat(fname, &t_stat);
+    //struct tm * timeinfo = localtime(&t_stat.st_mtime); 
+    *ftime = (uint64_t)t_stat.st_mtime; // last modification time
+    return 0;
+}
+
+// creates a timespec representing time NOW+ms from epoch
+static struct timespec _getTimeSpecFromNow(uint32_t ms) {
+	struct timespec ts;
+	uint32_t sec = (ms / 1000);
+	uint32_t nsec = (ms - sec * 1000) * 1000000;
+	clock_gettime(CLOCK_REALTIME, &ts);
+	ts.tv_sec += sec;
+	ts.tv_nsec += nsec;
+	//tv_nsec can be now higher than 1e9
+	ts.tv_sec += ts.tv_nsec / 1000000000;
+	ts.tv_nsec = ts.tv_nsec % 1000000000;
+	return ts;
+}
+
+#endif
+
+//// Init and destroy mutex with structures
+//int f_mutex_init(f_mutex_t* m) {
+//	if (m->mutex_init) {
+//		int ret = initmutex(m->mutex);
+//		if (ret == 0) m->mutex_init = 1;
+//		return ret;
+//	}
+//	return 0;
+//}
+//
+//int f_mutex_destroy(f_mutex_t* m) {
+//	if (m->mutex_init == 1) {
+//		int ret = destroymutex(m->mutex);
+//		if (ret == 0) m->mutex_init = 0;
+//		return ret;
+//	}
+//	return 0;
+//}
+
+// ***********************************************
+// Semaphore functions
+// ***********************************************
+// Initialized a semaphore
+int f_sem_init(f_sem_t* s) {
 	if (s == NULL)
 		return FERSLIB_ERR_GENERIC;
-
-#ifdef FERS_OS_WINDOWS
-	if (!CloseHandle(*s))
-		return FERSLIB_ERR_GENERIC;
-	*s = NULL;
+	int32_t ret = FERSLIB_SUCCESS;
+#ifndef _WIN32
+	if (sem_init(s, 0, 0) != 0)
+		ret = FERSLIB_ERR_GENERIC;
 #else
+	const HANDLE sem = CreateSemaphoreA(NULL, 0, 1, NULL);
+	if (sem == NULL)
+		ret = FERSLIB_ERR_GENERIC;
+	else
+		*s = sem;
+#endif
+	return ret;
+}
+
+// Destroy a semaphore
+int32_t f_sem_destroy(f_sem_t* s) {
+	if (s == NULL)
+		return FERSLIB_ERR_GENERIC;
+	int32_t ret = FERSLIB_SUCCESS;
+#ifndef _WIN32
 	if (sem_destroy(s) != 0)
-		return FERSLIB_ERR_GENERIC;
-#endif
-
-	return FERSLIB_SUCCESS;
-}
-
-/* ------------------------------------------------------------------------- */
-
-int f_sem_wait(f_sem_t *s, int32_t ms)
-{
-	if (s == NULL)
-		return FERSLIB_ERR_GENERIC;
-
-#ifdef FERS_OS_WINDOWS
-	DWORD timeout_ms = (ms == FERS_WAIT_INFINITE) ? INFINITE : (DWORD)ms;
-	DWORD r = WaitForSingleObjectEx(*s, timeout_ms, FALSE);
-	if (r == WAIT_OBJECT_0)
-		return FERSLIB_SUCCESS;
-	/* WAIT_TIMEOUT or any other error */
-	return FERSLIB_ERR_GENERIC;
-
-#else /* FERS_OS_POSIX */
-	int r;
-
-	if (ms == FERS_WAIT_INFINITE)
-	{
-		/* Block indefinitely */
-		do
-		{
-			r = sem_wait(s);
-		} while (r != 0 && errno == EINTR); /* retry on signal interrupt */
-		return (r == 0) ? FERSLIB_SUCCESS : FERSLIB_ERR_GENERIC;
-	}
-
-	if (ms == 0)
-	{
-		/* Non-blocking try */
-		r = sem_trywait(s);
-		if (r == 0)
-			return FERSLIB_SUCCESS;
-		if (errno == EAGAIN)
-			return FERSLIB_ERR_GENERIC; /* would block */
-		return FERSLIB_ERR_GENERIC;
-	}
-
-	/* Timed wait */
-	const struct timespec ts = _timespec_from_now_ms((uint32_t)ms);
-	do
-	{
-		r = sem_timedwait(s, &ts);
-	} while (r != 0 && errno == EINTR);
-
-	if (r == 0)
-		return FERSLIB_SUCCESS;
-	if (errno == ETIMEDOUT)
-		return FERSLIB_ERR_GENERIC;
-	return FERSLIB_ERR_GENERIC;
-#endif
-}
-
-/* ------------------------------------------------------------------------- */
-
-int f_sem_post(f_sem_t *s)
-{
-	if (s == NULL)
-		return FERSLIB_ERR_GENERIC;
-
-#ifdef FERS_OS_WINDOWS
-	if (!ReleaseSemaphore(*s, 1, NULL))
-		return FERSLIB_ERR_GENERIC;
+		ret = FERSLIB_ERR_GENERIC;
 #else
-	if (sem_post(s) != 0)
-		return FERSLIB_ERR_GENERIC;
+	if (!CloseHandle(*s))
+		ret = FERSLIB_ERR_GENERIC;
 #endif
+	return ret;
+}
 
-	return FERSLIB_SUCCESS;
+
+// Wait on a semaphore
+int32_t f_sem_wait(f_sem_t* s, int32_t ms) {
+	if (s == NULL)
+		return FERSLIB_ERR_GENERIC;
+	int32_t ret = FERSLIB_SUCCESS;
+#ifndef _WIN32
+	int r;
+	switch (ms) {
+	case 0:
+		r = (sem_timedwait(s, &(struct timespec){ 0 }) == 0) ? 0 : errno;
+		break;
+	case INFINITE:
+		r = (sem_wait(s) == 0) ? 0 : errno;
+		break;
+	default: {
+		const struct timespec ts = _getTimeSpecFromNow(ms);
+		r = (sem_timedwait(s, &ts) == 0) ? 0 : errno;
+		break;
+	}
+	}
+	switch (r) {
+	case 0:
+		break;
+	case ETIMEDOUT:
+		ret = FERSLIB_ERR_GENERIC;
+		break;
+	default:
+		ret = FERSLIB_ERR_GENERIC;
+		break;
+	}
+#else
+	const DWORD r = WaitForSingleObjectEx(*s, (DWORD)ms, FALSE);
+	switch (r) {
+	case WAIT_OBJECT_0:
+		break;
+	case WAIT_TIMEOUT:
+		ret = FERSLIB_ERR_GENERIC;
+		break;
+	default:
+		ret = FERSLIB_ERR_GENERIC;
+		break;
+	}
+#endif
+	return ret;
+}
+
+
+// Post on a semaphore
+int32_t f_sem_post(f_sem_t* s) {
+	if (s == NULL)
+		return FERSLIB_ERR_GENERIC;
+	int32_t ret = FERSLIB_SUCCESS;
+#ifndef _WIN32
+	if (sem_post(s) != 0)
+		ret = FERSLIB_ERR_GENERIC;
+#else
+	if (!ReleaseSemaphore(*s, 1, NULL))
+		ret = FERSLIB_ERR_GENERIC;
+#endif
+	return ret;
 }

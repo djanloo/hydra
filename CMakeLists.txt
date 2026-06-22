@@ -88,6 +88,25 @@ if(WIN32)
     # (the macro evaluates to nothing when _CAEN_FERS_EXPORT is defined,
     # effectively stripping dllimport/dllexport from all declarations).
     target_compile_definitions(ferslib PRIVATE _CAEN_FERS_EXPORT)
+
+    # Build with the Unicode Win32 API, exactly as CAEN ships ferslib (the
+    # janus-5202/5203 .vcxproj set <CharacterSet>Unicode</CharacterSet>). The
+    # non-UNICODE branches in ferslib (e.g. FERS_LLusb.cpp USB enumeration) are
+    # stale and do not compile under MSVC; UNICODE selects the maintained paths.
+    # The public ferslib API uses explicit char* (not TCHAR), so this does NOT
+    # change the pyferslib boundary.
+    target_compile_definitions(ferslib PRIVATE UNICODE _UNICODE)
+endif()
+
+if(MSVC)
+    # ferslib 2.2.0 commented out FERSlib.h's "#include FERS_MultiPlatform.h" and
+    # guards <stdbool.h> behind "#ifndef WIN32", so the two .c units that pull in
+    # FERSlib.h directly (FERS_LLeth.c / FERS_LLtdl.c) lose the C `bool` type on
+    # MSVC and fail on the bool-returning prototypes. CAEN sidesteps this by
+    # compiling ferslib as C++ (janus .vcxproj <CompileAs>CompileAsCpp). We instead
+    # force-include <stdbool.h> into every ferslib TU (mirrors the MinGW branch's
+    # `-include stdbool.h`), keeping the proven C compilation and touching no source.
+    target_compile_options(ferslib PRIVATE /FIstdbool.h)
 endif()
 
 if(MINGW)

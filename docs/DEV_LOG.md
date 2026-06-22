@@ -1,5 +1,57 @@
 # HydraFERS — dev log
 
+## ferslib upgrade 1.3.0 → 2.2.0 (2026-06-22)
+
+Vendored ferslib bumped from a hybrid 1.3.0 snapshot to **release/v2.2.0** (latest
+release line; `main`=2.0.0, tags stop at v2.0.0-beta). Sources pulled from
+`gitlab.caen.it/fers/software/ferslib.git`. File list identical to vendored (12 src
++ 9 include) → no CMake source-list change. Verified raw connect to a real **A5203**
+(`eth:192.168.50.3`) + `pyfers.System` (family/has_hv/init_readout) + **90 tests green**.
+
+- **Binding port** ([native/bindings/pyferslib.cpp](../native/bindings/pyferslib.cpp)):
+  - `ServEvent_t` was split upstream into `ServEvent5202_t`/`5203_t`/`5204_t` (different
+    field subsets). Kept ONE stable Python `ServEvent` wrapper, populated per-family via
+    `from_5202`/`from_5203`/`from_5204`; absent fields read 0. `build_event` now takes the
+    board `fers_code`, resolved once per batch from `handles[0]` (homogeneous system) via
+    a cached `FERS_GetBoardInfo`.
+  - TDL: `FERS_InitTDLchains` → `FERS_EnumTDLchains` (renamed `enum_tdl_chains`); added
+    `sync_tdl_chains` (`FERS_SyncTDLchains`). pyfers SDK didn't use the old name, so no
+    Python breakage.
+  - Fixed a latent bug: `ListEvent` ToA is read from `tstamp[]` for 5202 but `ToA[]` for
+    5203 (pre-2.2.0 always read `tstamp` → zero ToA on 5203). Added 5204 List/Counting
+    variants too.
+- **Build flags** ([CMakeLists.txt](../CMakeLists.txt)), matching how CAEN ships it (janus
+  .vcxproj): `UNICODE`/`_UNICODE` on the ferslib target (the non-UNICODE branches, e.g.
+  FERS_LLusb.cpp USB enum, are stale and don't compile), and `/FIstdbool.h` on MSVC
+  (2.2.0 commented out `#include FERS_MultiPlatform.h` and guards `<stdbool.h>` behind
+  `#ifndef WIN32`, so FERS_LLeth.c/FERS_LLtdl.c lose C `bool`). **No ferslib source was
+  modified.** Public API is char*-based, so UNICODE doesn't change the binding boundary.
+- Cross-checked the readout call order against janus-5203/5202: open → GetBoardInfo →
+  (TDL enum/sync only for concentrators) → InitReadout → configure(CFG_HARD) →
+  StartAcquisition → GetEvent. The engine already matches; no `FERS_PostConfigure` needed
+  for direct Ethernet.
+- **GPS param fixed by the upgrade:** `GPSPPSSource`/`GPSTimeUTC` (which broke GUI connect)
+  were UNKNOWN to the 1.3.0 parser (→ -14) but ARE recognized by 2.2.0. Verified on the real
+  5203.
+- **Still open (separate config bug, NOT a lib issue):** `engine.connect()` still fails
+  because `HydraConfig.to_ferslib_params()` forwards ~30 application-level pseudo-params that
+  ferslib never accepted in ANY version. Probed live on the 5203 (`set_param` each, 2.2.0):
+  rejected pseudo-params include `EventBuildingMode`, `TstampCoincWindow`/`TrgTimeWindow`,
+  `PresetTime`/`PresetCounts`, the `Job*`/`EnableJobs`/`RunSleep`/`RunNumber_AutoIncr` run
+  control, `DataFilePath`/`OF_*`/`DataAnalysis` output, and all histogram config
+  (`EHistoNbin`/`ToAHistoNbin`/`LeadTrailHistoNbin`/`ToTHistoNbin`/`*Rebin`/`*HistoMin`/
+  `MCSHistoNbin`), plus `EnableListZeroSuppr`/`EnableWalkCorrection`/`WalkFitCoeff`. These are
+  Janus *app* settings the old JanusC consumed itself; the engine must split hardware params
+  (→ set_param) from app params (consumed in `hydrafers.core`). NB ferslib labels -14 a
+  "WARNING" and JanusC continues past it — pyferslib instead raises, making it fatal; the
+  config split is the right fix, but relaxing set_param on -14 is an alternative to weigh.
+  Also two genuine 5203 *value* mismatches [-26]: `DigitalProbe0='TRG_ACCEPTED'` and
+  `DigitalProbe1='TX_DATA_VALID'` are not valid 5203 settings in 2.2.0 — default_5203.yaml
+  needs updating.
+
+---
+
+
 > Running notes kept **inside the repo** (versioned) so they travel across
 > machines via `git`. Claude updates and commits this each work session; it is
 > the portable source of truth for "what's done / what's next". (Claude's own
